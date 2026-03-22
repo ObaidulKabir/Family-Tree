@@ -5,6 +5,8 @@ import Credentials from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { z } from "zod"
 
+const debugEnabled = process.env.NEXTAUTH_DEBUG === 'true'
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
   adapter: PrismaAdapter(prisma),
@@ -48,6 +50,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
         return token
     }
+  },
+  debug: debugEnabled,
+  logger: {
+    error(error) {
+      console.error('auth:error', error)
+    },
+    warn(code) {
+      console.warn('auth:warn', code)
+    },
+    debug(message, metadata) {
+      if (!debugEnabled) return
+      console.log('auth:debug', message, metadata)
+    },
   },
   secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
   pages: {
