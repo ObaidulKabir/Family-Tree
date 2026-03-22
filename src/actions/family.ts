@@ -56,8 +56,8 @@ export async function getPersonDetails(personId: string) {
       
       if (!spouse) return null;
 
-      const divorceEvent = f.events.find(e => e.type === 'DIVORCE');
-      const marriageEvent = f.events.find(e => e.type === 'MARRIAGE');
+      const divorceEvent = f.events.find((e: { type: string }) => e.type === 'DIVORCE');
+      const marriageEvent = f.events.find((e: { type: string }) => e.type === 'MARRIAGE');
 
       return { 
           ...spouse, 
