@@ -10,11 +10,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      DATABASE_URL: file:./prisma/dev.db
       AUTH_SECRET: ci-only-secret
       NEXT_PUBLIC_APP_URL: http://localhost:3000
       NEXT_TELEMETRY_DISABLED: "1"
-      VERCEL: "1"
     steps:
       - uses: actions/checkout@v4
 

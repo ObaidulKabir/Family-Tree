@@ -13,7 +13,7 @@ function run(command, args) {
 
 await run('prisma', ['generate'])
 
-if (process.env.VERCEL) {
+if (process.env.VERCEL && process.env.DATABASE_URL) {
   await run('prisma', ['migrate', 'deploy'])
 }
 
