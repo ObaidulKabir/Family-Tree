@@ -1,0 +1,194 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  password      String?
+  emailVerified DateTime?
+  image         String?
+  
+  rootPersonId  String?   @unique
+  rootPerson    Person?   @relation("UserRootPerson", fields: [rootPersonId], references: [id])
+  
+  createdPeople Person[]  @relation("CreatedBy")
+  contributedLayers PersonLayer[]
+  sentInvitations Invitation[]
+  
+  accounts      Account[]
+  sessions      Session[]
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Account {
+  id                 String  @id @default(cuid())
+  userId             String
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String?
+  access_token       String?
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String?
+  session_state      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Person {
+  id          String    @id @default(cuid())
+  firstName   String
+  lastName    String?
+  middleName  String?
+  nickName    String?
+  title       String?
+  gender      String?
+  
+  dateOfBirth DateTime?
+  placeOfBirth String?
+  dateOfDeath DateTime?
+  placeOfDeath String?
+  
+  createdById String
+  createdBy   User   @relation("CreatedBy", fields: [createdById], references: [id])
+  
+  linkedUserId String? @unique
+  linkedUser   User?   @relation("UserRootPerson")
+  
+  // Relationships via Family
+  // The family this person is a child of
+  childOfFamilyId String?
+  childOfFamily   Family? @relation("FamilyChildren", fields: [childOfFamilyId], references: [id])
+
+  // Families where this person is a parent (Partner/Spouse)
+  familiesAsParent1 Family[] @relation("FamilyParent1")
+  familiesAsParent2 Family[] @relation("FamilyParent2")
+
+  // Personal events (Birth, Death)
+  events       FamilyEvent[] @relation("PersonEvents")
+  
+  photos      Photo[]
+  invitations Invitation[]
+  layers      PersonLayer[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PersonLayer {
+  id            String    @id @default(cuid())
+  personId      String
+  person        Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
+  
+  // Data fields (snapshot of Person fields)
+  firstName     String?
+  lastName      String?
+  middleName    String?
+  nickName      String?
+  title         String?
+  gender        String?
+  dateOfBirth   DateTime?
+  placeOfBirth  String?
+  dateOfDeath   DateTime?
+  placeOfDeath  String?
+  
+  // Meta
+  contributorId String? 
+  contributor   User?     @relation(fields: [contributorId], references: [id])
+  
+  relationshipDistance Int? // 0=Self, 1=Parent/Child, etc.
+  confidenceScore      Float @default(1.0)
+  
+  createdAt     DateTime  @default(now())
+}
+
+model Family {
+  id          String   @id @default(cuid())
+
+  parent1Id   String?
+  parent1     Person?  @relation("FamilyParent1", fields: [parent1Id], references: [id])
+
+  parent2Id   String?
+  parent2     Person?  @relation("FamilyParent2", fields: [parent2Id], references: [id])
+
+  children    Person[] @relation("FamilyChildren")
+
+  events      FamilyEvent[] @relation("FamilyEvents") // Marriage, Divorce
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model FamilyEvent {
+  id          String   @id @default(cuid())
+  type        String   // BIRTH, DEATH, MARRIAGE, DIVORCE
+  date        DateTime?
+  place       String?
+  description String?
+  
+  // Event can belong to a Person (Birth, Death)
+  personId    String?
+  person      Person?  @relation("PersonEvents", fields: [personId], references: [id], onDelete: Cascade)
+  
+  // OR Event can belong to a Family (Marriage, Divorce)
+  familyId    String?
+  family      Family?  @relation("FamilyEvents", fields: [familyId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Photo {
+  id          String   @id @default(cuid())
+  url         String
+  caption     String?
+  date        DateTime?
+  personId    String
+  person      Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Invitation {
+  id        String   @id @default(cuid())
+  email     String
+  personId  String
+  person    Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  status    String   @default("PENDING") 
+  inviterId String
+  inviter   User     @relation(fields: [inviterId], references: [id])
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
