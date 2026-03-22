@@ -2,6 +2,7 @@
 
 import { prisma } from '@/lib/prisma'
 import { auth } from '@/auth'
+import type { Prisma } from '@prisma/client'
 import { randomBytes } from 'crypto'
 
 export async function inviteUser(personId: string, email: string) {
@@ -46,7 +47,7 @@ export async function acceptInvitation(token: string) {
     if (!session.user.id) return { error: "Unauthorized" };
     const userId = session.user.id;
 
-    return await prisma.$transaction(async (tx) => {
+    return await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         const invitation = await tx.invitation.findUnique({ 
             where: { token },
             include: { person: true }
