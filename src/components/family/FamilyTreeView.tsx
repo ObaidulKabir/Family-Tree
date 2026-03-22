@@ -2,36 +2,66 @@
 
 import { useState, useEffect } from 'react';
 import { getPersonDetails } from '@/actions/family';
-import { User as UserIcon, Heart, Plus, Share2, Edit2, X, ChevronRight } from 'lucide-react';
+import { User as UserIcon, Heart, Plus, Share2, Edit2, X } from 'lucide-react';
 import AddPersonModal from './AddPersonModal';
 import InviteModal from './InviteModal';
 import EditPersonModal from './EditPersonModal';
 import DivorceModal from './DivorceModal';
 
+type DateLike = string | Date | null | undefined;
+
+type PhotoLike = {
+  url: string;
+  date?: DateLike;
+};
+
+type PersonLike = {
+  id: string;
+  firstName: string;
+  lastName?: string | null;
+  title?: string | null;
+  nickName?: string | null;
+  dateOfBirth?: DateLike;
+  dateOfDeath?: DateLike;
+  photos?: PhotoLike[];
+  isDivorced?: boolean;
+};
+
+type FamilyTreeData = {
+  error?: string;
+  person: PersonLike;
+  parents: PersonLike[];
+  spouses: PersonLike[];
+  children: PersonLike[];
+  siblings: PersonLike[];
+};
+
 export default function FamilyTreeView({ initialPersonId }: { initialPersonId: string }) {
   const [currentPersonId, setCurrentPersonId] = useState(initialPersonId);
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<FamilyTreeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDivorceModal, setShowDivorceModal] = useState(false);
-  const [selectedSpouse, setSelectedSpouse] = useState<any>(null);
-  const [editingPerson, setEditingPerson] = useState<any>(null);
+  const [selectedSpouse, setSelectedSpouse] = useState<PersonLike | null>(null);
+  const [editingPerson, setEditingPerson] = useState<PersonLike | null>(null);
   const [addRelationType, setAddRelationType] = useState<'PARENT' | 'CHILD' | 'SPOUSE' | null>(null);
-
-  useEffect(() => {
-    loadPerson(currentPersonId);
-  }, [currentPersonId]);
 
   async function loadPerson(id: string) {
     setLoading(true);
-    const result = await getPersonDetails(id);
-    if (result && !result.error) {
+    const result = (await getPersonDetails(id)) as FamilyTreeData | { error: string };
+    if (result && !('error' in result)) {
       setData(result);
     }
     setLoading(false);
   }
+
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      void loadPerson(currentPersonId);
+    });
+  }, [currentPersonId]);
   
   const handleAdd = (type: 'PARENT' | 'CHILD' | 'SPOUSE') => {
       setAddRelationType(type);
@@ -43,7 +73,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
       loadPerson(currentPersonId);
   };
 
-  const handleEdit = (p: any) => {
+  const handleEdit = (p: PersonLike) => {
       setEditingPerson(p);
       setShowEditModal(true);
   };
@@ -54,7 +84,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
       loadPerson(currentPersonId);
   };
 
-  const handleDivorce = (spouse: any) => {
+  const handleDivorce = (spouse: PersonLike) => {
       setSelectedSpouse(spouse);
       setShowDivorceModal(true);
   };
@@ -78,7 +108,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
         <div className="flex gap-8 items-end">
           {parents.length > 0 ? (
             <div className="flex gap-4 p-4 bg-white/50 rounded-xl border border-gray-100 shadow-sm">
-              {parents.map((p: any) => (
+              {parents.map((p: PersonLike) => (
                 <PersonCard key={p.id} person={p} onClick={() => setCurrentPersonId(p.id)} onEdit={() => handleEdit(p)} />
               ))}
             </div>
@@ -107,7 +137,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
             <div className="flex flex-col items-center">
                 <h3 className="mb-2 text-xs font-bold text-gray-400 tracking-wider uppercase">Siblings</h3>
                 <div className="flex gap-2 flex-wrap max-w-xs justify-center">
-                    {siblings.map((s: any) => (
+                    {siblings.map((s: PersonLike) => (
                         <PersonCard key={s.id} person={s} compact onClick={() => setCurrentPersonId(s.id)} onEdit={() => handleEdit(s)} />
                     ))}
                 </div>
@@ -143,7 +173,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                     </div>
                     <h2 className="text-2xl font-serif font-bold text-gray-800">{person.firstName} {person.lastName}</h2>
                     <p className="text-sm text-indigo-600 font-medium mb-1">{person.title || ''}</p>
-                    {person.nickName && <p className="text-xs text-gray-500 italic">"{person.nickName}"</p>}
+                    {person.nickName && <p className="text-xs text-gray-500 italic">&quot;{person.nickName}&quot;</p>}
                     
                     <div className="text-xs text-gray-400 mt-2 flex flex-col items-center gap-0.5">
                         <span>{person.dateOfBirth ? `Born: ${new Date(person.dateOfBirth).toLocaleDateString()}` : 'No DOB'}</span>
@@ -173,7 +203,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                     <>
                         <div className="h-16 w-px bg-gray-200"></div>
                         <div className="flex gap-4">
-                            {spouses.map((s: any) => (
+                            {spouses.map((s: PersonLike) => (
                                 <div key={s.id} className="relative flex flex-col items-center group">
                                     <div className="mb-2 text-xs text-red-300"><Heart size={16} fill="currentColor" /></div>
                                     <PersonCard person={s} onClick={() => setCurrentPersonId(s.id)} onEdit={() => handleEdit(s)} />
@@ -211,7 +241,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
          
         <h3 className="mb-4 text-xs font-bold text-gray-400 tracking-wider uppercase">Children</h3>
         <div className="flex gap-6 flex-wrap justify-center">
-          {children.map((c: any) => (
+          {children.map((c: PersonLike) => (
             <div key={c.id} className="relative pt-6">
                 {/* Vertical line from horizontal bar to child */}
                 <div className="absolute top-0 left-1/2 -translate-x-1/2 h-6 w-0.5 bg-gray-300"></div>
@@ -262,7 +292,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
   );
 }
 
-function PersonCard({ person, onClick, onEdit, compact }: { person: any, onClick: () => void, onEdit?: () => void, compact?: boolean }) {
+function PersonCard({ person, onClick, onEdit, compact }: { person: PersonLike, onClick: () => void, onEdit?: () => void, compact?: boolean }) {
     return (
         <div 
             onClick={onClick}

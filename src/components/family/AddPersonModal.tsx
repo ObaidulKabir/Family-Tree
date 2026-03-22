@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { addPerson } from '@/actions/family';
 import { X } from 'lucide-react';
 
-export default function AddPersonModal({ relationToId, relationType, onClose, onSuccess }: any) {
+export default function AddPersonModal({ relationToId, relationType, onClose, onSuccess }: { relationToId: string, relationType: 'PARENT' | 'CHILD' | 'SPOUSE', onClose: () => void, onSuccess: () => void }) {
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -34,7 +34,7 @@ export default function AddPersonModal({ relationToId, relationType, onClose, on
         } else {
             onSuccess();
         }
-    } catch (e) {
+    } catch {
         setError("Failed to add person");
     } finally {
         setLoading(false);

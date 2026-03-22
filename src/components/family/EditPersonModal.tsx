@@ -1,11 +1,23 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { updatePerson } from '@/actions/family';
 import { X } from 'lucide-react';
 
 interface EditPersonModalProps {
-  person: any;
+  person: {
+    id: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    middleName?: string | null;
+    nickName?: string | null;
+    title?: string | null;
+    gender?: string | null;
+    dateOfBirth?: string | Date | null;
+    placeOfBirth?: string | null;
+    dateOfDeath?: string | Date | null;
+    placeOfDeath?: string | null;
+  };
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -50,7 +62,7 @@ export default function EditPersonModal({ person, onClose, onSuccess }: EditPers
       } else {
         onSuccess();
       }
-    } catch (err) {
+    } catch {
       setError('An error occurred');
     } finally {
       setLoading(false);

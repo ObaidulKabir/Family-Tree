@@ -6,7 +6,7 @@ import { X } from 'lucide-react';
 
 interface DivorceModalProps {
   personId: string;
-  spouse: any;
+  spouse: { id: string; firstName: string; lastName?: string | null };
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -33,7 +33,7 @@ export default function DivorceModal({ personId, spouse, onClose, onSuccess }: D
       } else {
         onSuccess();
       }
-    } catch (err) {
+    } catch {
       setError('An error occurred');
     } finally {
       setLoading(false);

@@ -41,7 +41,7 @@ export async function getPersonDetails(personId: string) {
   if (!person) return { error: "Person not found" }
 
   // Parents
-  let parents: any[] = [];
+  const parents: unknown[] = [];
   if (person.childOfFamily) {
       if (person.childOfFamily.parent1) parents.push(person.childOfFamily.parent1);
       if (person.childOfFamily.parent2) parents.push(person.childOfFamily.parent2);
@@ -73,7 +73,7 @@ export async function getPersonDetails(personId: string) {
   const children = allFamilies.flatMap(f => f.children);
 
   // Siblings
-  let siblings: any[] = [];
+  let siblings: unknown[] = [];
   if (person.childOfFamilyId) {
       const family = await prisma.family.findUnique({
           where: { id: person.childOfFamilyId },

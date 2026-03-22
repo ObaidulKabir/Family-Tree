@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { inviteUser } from '@/actions/invitation';
 import { X, Copy, Check } from 'lucide-react';
 
-export default function InviteModal({ personId, personName, onClose }: any) {
+export default function InviteModal({ personId, personName, onClose }: { personId: string, personName: string, onClose: () => void }) {
   const [email, setEmail] = useState('');
   const [inviteLink, setInviteLink] = useState('');
   const [loading, setLoading] = useState(false);
@@ -23,7 +23,7 @@ export default function InviteModal({ personId, personName, onClose }: any) {
         } else if (result.link) {
             setInviteLink(result.link);
         }
-    } catch (e) {
+    } catch {
         setError("Failed to generate invite");
     } finally {
         setLoading(false);

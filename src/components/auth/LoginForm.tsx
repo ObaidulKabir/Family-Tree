@@ -28,7 +28,7 @@ export default function LoginForm() {
         router.push('/dashboard');
         router.refresh();
       }
-    } catch (e) {
+    } catch {
       setError('Something went wrong');
     }
   };
@@ -66,7 +66,7 @@ export default function LoginForm() {
         </button>
       </form>
       <div className="text-center">
-        <p className="text-sm">Don't have an account? <Link href="/register" className="text-indigo-600 hover:underline">Register</Link></p>
+        <p className="text-sm">Don&apos;t have an account? <Link href="/register" className="text-indigo-600 hover:underline">Register</Link></p>
       </div>
     </div>
   );
