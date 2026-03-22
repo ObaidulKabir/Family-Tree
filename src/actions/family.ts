@@ -21,6 +21,7 @@ export async function getPersonDetails(personId: string) {
         },
         familiesAsParent1: {
             include: {
+                parent1: true,
                 parent2: true,
                 children: true,
                 events: true
@@ -29,6 +30,7 @@ export async function getPersonDetails(personId: string) {
         familiesAsParent2: {
             include: {
                 parent1: true,
+                parent2: true,
                 children: true,
                 events: true
             }
@@ -98,6 +100,8 @@ export async function addPerson(
 ) {
     const session = await auth();
     if (!session?.user) return { error: "Unauthorized" };
+    if (!session.user.id) return { error: "Unauthorized" };
+    const userId = session.user.id;
 
     try {
         const newPerson = await prisma.person.create({
@@ -107,7 +111,7 @@ export async function addPerson(
                 gender: data.gender,
                 dateOfBirth: data.dateOfBirth,
                 placeOfBirth: data.placeOfBirth,
-                createdById: session.user.id
+                createdById: userId
             }
         });
 
@@ -120,7 +124,7 @@ export async function addPerson(
                 gender: data.gender,
                 dateOfBirth: data.dateOfBirth,
                 placeOfBirth: data.placeOfBirth,
-                contributorId: session.user.id,
+                contributorId: userId,
                 relationshipDistance: 0,
                 confidenceScore: 1.0
             }
@@ -229,13 +233,15 @@ export async function updatePerson(
 ) {
     const session = await auth();
     if (!session?.user) return { error: "Unauthorized" };
+    if (!session.user.id) return { error: "Unauthorized" };
+    const userId = session.user.id;
     
     const person = await prisma.person.findUnique({ where: { id: personId } });
     if (!person) return { error: "Person not found" };
     
     try {
         // Create History Layer
-        const distance = (person.createdById === session.user.id || person.linkedUserId === session.user.id) ? 0 : 5;
+        const distance = (person.createdById === userId || person.linkedUserId === userId) ? 0 : 5;
         
         await prisma.personLayer.create({
             data: {
@@ -250,7 +256,7 @@ export async function updatePerson(
                 dateOfDeath: data.dateOfDeath,
                 placeOfDeath: data.placeOfDeath,
                 title: data.title,
-                contributorId: session.user.id,
+                contributorId: userId,
                 relationshipDistance: distance
             }
         });
@@ -320,6 +326,7 @@ export async function updatePerson(
 export async function divorceSpouse(personId: string, spouseId: string, divorceDate?: Date) {
     const session = await auth();
     if (!session?.user) return { error: "Unauthorized" };
+    if (!session.user.id) return { error: "Unauthorized" };
 
     try {
         // Find the family

@@ -1,12 +1,5 @@
 'use client';
 
-import { useFormState, useFormStatus } from 'react-dom';
-import { authenticate } from '@/actions/login'; // Need to create this action wrapper for signIn? 
-// Actually signIn can be called from client directly if imported from next-auth/react?
-// No, signIn from 'next-auth/react' is client side. signIn from '@/auth' is server side.
-// Let's use server action for login too, or use client side signIn.
-// Client side signIn is easier for credentials.
-
 import { signIn } from 'next-auth/react';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';

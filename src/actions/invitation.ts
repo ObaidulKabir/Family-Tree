@@ -7,6 +7,8 @@ import { randomBytes } from 'crypto'
 export async function inviteUser(personId: string, email: string) {
     const session = await auth();
     if (!session?.user) return { error: "Unauthorized" };
+    if (!session.user.id) return { error: "Unauthorized" };
+    const userId = session.user.id;
 
     const person = await prisma.person.findUnique({ where: { id: personId } });
     if (!person) return { error: "Person not found" };
@@ -17,7 +19,7 @@ export async function inviteUser(personId: string, email: string) {
     // Even if I didn't create him (maybe my father did), I should be able to invite?
     // For now, let's keep it to creator to avoid spam, or check if user has access to this tree.
     // But "createdById" is simple.
-    if (person.createdById !== session.user.id) {
+    if (person.createdById !== userId) {
         // return { error: "Only creator can invite" };
     }
 
@@ -28,7 +30,7 @@ export async function inviteUser(personId: string, email: string) {
             email,
             personId,
             token,
-            inviterId: session.user.id
+            inviterId: userId
         }
     });
 
@@ -41,6 +43,8 @@ export async function inviteUser(personId: string, email: string) {
 export async function acceptInvitation(token: string) {
     const session = await auth();
     if (!session?.user) return { error: "Unauthorized" };
+    if (!session.user.id) return { error: "Unauthorized" };
+    const userId = session.user.id;
 
     return await prisma.$transaction(async (tx) => {
         const invitation = await tx.invitation.findUnique({ 
@@ -51,7 +55,7 @@ export async function acceptInvitation(token: string) {
         if (invitation.status !== 'PENDING') throw new Error("Invitation already processed");
 
         const user = await tx.user.findUnique({
-            where: { id: session.user.id },
+            where: { id: userId },
             include: { rootPerson: true }
         });
 
