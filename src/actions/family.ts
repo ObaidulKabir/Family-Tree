@@ -80,7 +80,7 @@ export async function getPersonDetails(personId: string) {
           include: { children: true }
       });
       if (family) {
-          siblings = family.children.filter(c => c.id !== person.id);
+          siblings = family.children.filter((c: { id: string }) => c.id !== person.id);
       }
   }
 
