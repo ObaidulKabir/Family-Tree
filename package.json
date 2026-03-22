@@ -2,9 +2,13 @@
   "name": "family-tree",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build --webpack",
+    "export:json": "node scripts/export-db.mjs",
     "postinstall": "prisma generate",
     "start": "next start",
     "lint": "eslint"
