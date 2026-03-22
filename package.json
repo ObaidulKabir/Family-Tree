@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build --webpack",
+    "vercel-build": "node scripts/vercel-build.mjs",
     "export:json": "node scripts/export-db.mjs",
     "postinstall": "prisma generate",
     "start": "next start",
