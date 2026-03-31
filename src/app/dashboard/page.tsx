@@ -13,13 +13,36 @@ export default async function DashboardPage() {
   // Fetch the root person ID for the user
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { rootPersonId: true }
+    select: { id: true, name: true, rootPersonId: true }
   });
 
-  if (!user?.rootPersonId) {
-    // This might happen if registration failed halfway or manual DB edit.
-    // Ideally we should create one or prompt user.
-    return <div>Error: No root person found for user.</div>;
+  if (!user) {
+    return <div>Error: User not found.</div>;
+  }
+
+  const displayName = user.name ?? session.user.name ?? 'User'
+
+  let rootPersonId = user.rootPersonId
+  if (!rootPersonId) {
+    const parts = displayName.trim().split(/\s+/).filter(Boolean)
+    const firstName = parts[0] ?? 'User'
+    const lastName = parts.slice(1).join(' ')
+
+    const rootPerson = await prisma.person.create({
+      data: {
+        firstName,
+        lastName: lastName || '',
+        createdById: user.id,
+        linkedUserId: user.id,
+      },
+    })
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { rootPersonId: rootPerson.id },
+    })
+
+    rootPersonId = rootPerson.id
   }
 
   return (
@@ -32,14 +55,14 @@ export default async function DashboardPage() {
             </div>
             
             <div className="flex items-center gap-6">
-               <span className="text-sm text-gray-500 font-medium hidden md:block">Welcome, {session.user.name}</span>
+               <span className="text-sm text-gray-500 font-medium hidden md:block">Welcome, {displayName}</span>
                <SignOut />
             </div>
         </div>
       </header>
       
       <main className="container mx-auto px-4 py-8">
-         <FamilyTreeView initialPersonId={user.rootPersonId} />
+         <FamilyTreeView initialPersonId={rootPersonId} />
       </main>
     </div>
   );
