@@ -149,7 +149,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
             <div className="flex items-center gap-6 p-6 bg-white rounded-2xl shadow-xl border border-indigo-50 ring-4 ring-indigo-50/50">
                 
                 {/* Focal Person */}
-                <div className="flex flex-col items-center">
+                <div className="flex flex-col items-center group">
                     <div className="w-24 h-24 bg-indigo-100 rounded-full flex items-center justify-center mb-3 overflow-hidden border-4 border-white shadow-md relative group">
                         {person.photos && person.photos.length > 0 ? (
                             <>
@@ -163,13 +163,6 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                         ) : (
                             <UserIcon size={40} className="text-indigo-400" />
                         )}
-                        <button
-                            onClick={(e) => { e.stopPropagation(); handleEdit(person); }}
-                            className="absolute top-1 right-1 p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                            title="Edit"
-                        >
-                            <Edit2 size={16} />
-                        </button>
                     </div>
                     <h2 className="text-2xl font-serif font-bold text-gray-800">{person.firstName} {person.lastName}</h2>
                     <p className="text-sm text-indigo-600 font-medium mb-1">{person.title || ''}</p>
@@ -180,7 +173,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                         {person.dateOfDeath && <span className="text-gray-500">Died: {new Date(person.dateOfDeath).toLocaleDateString()}</span>}
                     </div>
                     
-                    <div className="flex gap-2 mt-4 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                    <div className="flex gap-2 mt-4 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-200">
                         <button 
                             onClick={() => handleEdit(person)}
                             className="p-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors"
