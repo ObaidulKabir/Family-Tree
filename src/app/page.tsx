@@ -32,6 +32,12 @@ export default async function Home() {
           >
             Register
           </Link>
+          <Link
+            href="/invite"
+            className="px-6 py-3 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 text-lg font-medium"
+          >
+            Have an invite?
+          </Link>
         </div>
       </main>
     </div>

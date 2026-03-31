@@ -24,6 +24,9 @@ export async function register(formData: FormData) {
   }
 
   const { email, password, name } = validatedFields.data
+  const rawCallbackUrl = formData.get('callbackUrl')
+  const callbackUrl =
+    typeof rawCallbackUrl === 'string' && rawCallbackUrl.startsWith('/') ? rawCallbackUrl : '/dashboard'
 
   const existingUser = await prisma.user.findUnique({
     where: { email },
@@ -69,7 +72,7 @@ export async function register(formData: FormData) {
     await signIn("credentials", {
       email,
       password,
-      redirectTo: "/dashboard",
+      redirectTo: callbackUrl,
     })
   } catch (error) {
     if (error instanceof AuthError) {

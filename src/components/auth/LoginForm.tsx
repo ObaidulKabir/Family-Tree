@@ -2,7 +2,7 @@
 
 import { signIn } from 'next-auth/react';
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
 export default function LoginForm() {
@@ -10,6 +10,10 @@ export default function LoginForm() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const router = useRouter();
+  const searchParams = useSearchParams()
+
+  const rawCallbackUrl = searchParams.get('callbackUrl')
+  const callbackUrl = rawCallbackUrl && rawCallbackUrl.startsWith('/') ? rawCallbackUrl : null
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,13 +23,14 @@ export default function LoginForm() {
       const result = await signIn('credentials', {
         email,
         password,
+        callbackUrl: callbackUrl ?? undefined,
         redirect: false,
       });
 
       if (result?.error) {
         setError('Invalid credentials');
       } else {
-        router.push('/dashboard');
+        router.push(callbackUrl ?? '/dashboard');
         router.refresh();
       }
     } catch {
@@ -66,7 +71,18 @@ export default function LoginForm() {
         </button>
       </form>
       <div className="text-center">
-        <p className="text-sm">Don&apos;t have an account? <Link href="/register" className="text-indigo-600 hover:underline">Register</Link></p>
+        <p className="text-sm">
+          Don&apos;t have an account?{' '}
+          <Link href={callbackUrl ? `/register?callbackUrl=${encodeURIComponent(callbackUrl)}` : '/register'} className="text-indigo-600 hover:underline">
+            Register
+          </Link>
+        </p>
+        <p className="text-sm mt-2">
+          Have an invite?{' '}
+          <Link href="/invite" className="text-indigo-600 hover:underline">
+            Open invitation page
+          </Link>
+        </p>
       </div>
     </div>
   );
