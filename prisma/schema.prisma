@@ -21,6 +21,11 @@ model User {
   createdPeople Person[]  @relation("CreatedBy")
   contributedLayers PersonLayer[]
   sentInvitations Invitation[]
+  personLinks   UserPersonLink[]
+  personClaims  PersonClaim[] @relation("PersonClaimContributor")
+  relationshipClaims RelationshipClaim[] @relation("RelationshipClaimContributor")
+  createdPersonLinks PersonLink[] @relation("PersonLinkCreatedBy")
+  resolutionCases ResolutionCase[] @relation("ResolutionCaseCreatedBy")
   
   accounts      Account[]
   sessions      Session[]
@@ -99,6 +104,12 @@ model Person {
   photos      Photo[]
   invitations Invitation[]
   layers      PersonLayer[]
+  userLinks   UserPersonLink[]
+  claims      PersonClaim[]
+  outgoingRelationships RelationshipClaim[] @relation("RelationshipFromPerson")
+  incomingRelationships RelationshipClaim[] @relation("RelationshipToPerson")
+  leftLinks   PersonLink[] @relation("PersonLinkLeft")
+  rightLinks  PersonLink[] @relation("PersonLinkRight")
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -191,4 +202,112 @@ model Invitation {
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model UserPersonLink {
+  id               String   @id @default(cuid())
+  userId           String
+  personId         String
+  role             String   @default("CONTRIBUTOR")
+  status           String   @default("ACTIVE")
+  assertedDistance Int?
+  computedDistance Int?
+  distancePath     Json?
+  invitedByUserId  String?
+  invitationId     String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  person           Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, personId])
+  @@index([personId, computedDistance])
+  @@index([userId, status])
+}
+
+model PersonClaim {
+  id                 String   @id @default(cuid())
+  personId           String
+  field              String
+  valueJson          Json
+  contributorId      String?
+  sourceType         String   @default("USER")
+  sourceRefId        String?
+  assertedDistance   Int?
+  computedDistance   Int?
+  confidenceScore    Float    @default(1.0)
+  corroborationScore Float    @default(0)
+  resolutionStatus   String   @default("ACTIVE")
+  supersedesClaimId  String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  person             Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  contributor        User?    @relation("PersonClaimContributor", fields: [contributorId], references: [id])
+
+  @@index([personId, field, resolutionStatus])
+  @@index([contributorId, createdAt])
+}
+
+model RelationshipClaim {
+  id                 String   @id @default(cuid())
+  fromPersonId       String
+  toPersonId         String
+  relationshipType   String
+  contributorId      String?
+  sourceType         String   @default("USER")
+  sourceRefId        String?
+  assertedDistance   Int?
+  computedDistance   Int?
+  confidenceScore    Float    @default(1.0)
+  resolutionStatus   String   @default("ACTIVE")
+  validFrom          DateTime?
+  validTo            DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  fromPerson         Person   @relation("RelationshipFromPerson", fields: [fromPersonId], references: [id], onDelete: Cascade)
+  toPerson           Person   @relation("RelationshipToPerson", fields: [toPersonId], references: [id], onDelete: Cascade)
+  contributor        User?    @relation("RelationshipClaimContributor", fields: [contributorId], references: [id])
+
+  @@index([fromPersonId, relationshipType, resolutionStatus])
+  @@index([toPersonId, relationshipType, resolutionStatus])
+}
+
+model PersonLink {
+  id               String   @id @default(cuid())
+  leftPersonId     String
+  rightPersonId    String
+  linkType         String   @default("POSSIBLE_SAME")
+  sourceType       String   @default("SYSTEM")
+  confidenceScore  Float    @default(0)
+  resolutionStatus String   @default("OPEN")
+  createdByUserId  String?
+  resolutionCaseId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  leftPerson       Person   @relation("PersonLinkLeft", fields: [leftPersonId], references: [id], onDelete: Cascade)
+  rightPerson      Person   @relation("PersonLinkRight", fields: [rightPersonId], references: [id], onDelete: Cascade)
+  createdBy        User?    @relation("PersonLinkCreatedBy", fields: [createdByUserId], references: [id])
+
+  @@unique([leftPersonId, rightPersonId])
+  @@index([resolutionStatus, linkType])
+}
+
+model ResolutionCase {
+  id               String   @id @default(cuid())
+  entityType       String
+  entityRefId      String
+  field            String?
+  status           String   @default("OPEN")
+  rationaleJson    Json?
+  createdByUserId  String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  createdBy        User?    @relation("ResolutionCaseCreatedBy", fields: [createdByUserId], references: [id])
+
+  @@index([entityType, entityRefId, status])
 }

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { updatePerson } from '@/actions/family';
-import { X } from 'lucide-react';
+import { Loader2, Upload, X } from 'lucide-react';
 
 interface EditPersonModalProps {
   person: {
@@ -17,6 +17,10 @@ interface EditPersonModalProps {
     placeOfBirth?: string | null;
     dateOfDeath?: string | Date | null;
     placeOfDeath?: string | null;
+    photos?: Array<{
+      url: string;
+      date?: string | Date | null;
+    }>;
   };
   onClose: () => void;
   onSuccess: () => void;
@@ -39,7 +43,47 @@ export default function EditPersonModal({ person, onClose, onSuccess }: EditPers
   });
   
   const [loading, setLoading] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [error, setError] = useState('');
+  const [replacePhoto, setReplacePhoto] = useState(true);
+  const [removePhoto, setRemovePhoto] = useState(false);
+
+  const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploadingPhoto(true);
+    setError('');
+
+    try {
+      const uploadFormData = new FormData();
+      uploadFormData.append('file', file);
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: uploadFormData,
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setError(result.error ?? 'Failed to upload photo');
+        return;
+      }
+
+      setFormData((current) => ({
+        ...current,
+        photoUrl: result.url,
+      }));
+      setReplacePhoto(true);
+      setRemovePhoto(false);
+    } catch {
+      setError('Failed to upload photo');
+    } finally {
+      setUploadingPhoto(false);
+      event.target.value = '';
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,7 +96,9 @@ export default function EditPersonModal({ person, onClose, onSuccess }: EditPers
         dateOfBirth: formData.dateOfBirth ? new Date(formData.dateOfBirth) : undefined,
         dateOfDeath: formData.dateOfDeath ? new Date(formData.dateOfDeath) : undefined,
         photoUrl: formData.photoUrl || undefined,
-        photoDate: formData.photoDate ? new Date(formData.photoDate) : undefined
+        photoDate: formData.photoDate ? new Date(formData.photoDate) : undefined,
+        replacePhoto,
+        removePhoto
       };
       
       const result = await updatePerson(person.id, data);
@@ -183,12 +229,66 @@ export default function EditPersonModal({ person, onClose, onSuccess }: EditPers
           </div>
           
           <div>
-              <label className="block text-sm font-medium mb-1">Add Photo (URL)</label>
-              <div className="flex gap-2">
+              <label className="block text-sm font-medium mb-1">Add Photo</label>
+              <div className="space-y-3">
+                {person.photos?.[0]?.url ? (
+                  <div className="rounded border bg-white p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Current photo</div>
+                    <div className="mt-2 flex items-center gap-3">
+                      <img src={person.photos[0].url} alt="Current" className="h-16 w-16 rounded object-cover border" />
+                      <div className="flex flex-col gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRemovePhoto(true)
+                            setFormData((current) => ({ ...current, photoUrl: '', photoDate: '' }))
+                          }}
+                          className="w-fit rounded border border-gray-300 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                        >
+                          Remove current photo
+                        </button>
+                        <label className="flex items-center gap-2 text-xs text-gray-600">
+                          <input
+                            type="checkbox"
+                            checked={replacePhoto}
+                            onChange={(event) => setReplacePhoto(event.target.checked)}
+                            className="h-4 w-4"
+                          />
+                          Replace existing photo on save
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded border border-dashed border-indigo-300 bg-indigo-50 px-4 py-3 text-sm font-medium text-indigo-700 hover:bg-indigo-100">
+                  {uploadingPhoto ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                  <span>{uploadingPhoto ? 'Uploading photo...' : 'Upload image from device'}</span>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    className="hidden"
+                    onChange={handlePhotoUpload}
+                    disabled={uploadingPhoto}
+                  />
+                </label>
+
+                {formData.photoUrl ? (
+                  <div className="rounded border bg-gray-50 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">New photo preview</div>
+                    <img src={formData.photoUrl} alt="Uploaded preview" className="h-28 w-28 rounded object-cover border" />
+                    <p className="mt-2 break-all text-xs text-gray-500">{formData.photoUrl}</p>
+                  </div>
+                ) : null}
+
+                <div className="flex gap-2">
                 <input
                   className="w-full border rounded px-3 py-2 flex-grow"
                   value={formData.photoUrl}
-                  onChange={e => setFormData({...formData, photoUrl: e.target.value})}
+                  onChange={e => {
+                    setFormData({...formData, photoUrl: e.target.value})
+                    setRemovePhoto(false)
+                  }}
                   placeholder="https://example.com/photo.jpg"
                 />
                 <input
@@ -198,8 +298,9 @@ export default function EditPersonModal({ person, onClose, onSuccess }: EditPers
                     onChange={e => setFormData({...formData, photoDate: e.target.value})}
                     title="Photo Date"
                 />
+                </div>
               </div>
-              <p className="text-xs text-gray-500 mt-1">Provide a direct link to an image and optional date.</p>
+              <p className="text-xs text-gray-500 mt-1">Upload directly from your device or paste an image URL. Supported: JPG, PNG, WEBP, GIF up to 5MB.</p>
           </div>
 
           <div className="pt-4 flex gap-3">
@@ -212,7 +313,7 @@ export default function EditPersonModal({ person, onClose, onSuccess }: EditPers
             </button>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || uploadingPhoto}
               className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50"
             >
               {loading ? 'Saving...' : 'Save Changes'}

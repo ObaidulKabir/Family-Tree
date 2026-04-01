@@ -12,7 +12,8 @@
     "export:json": "node scripts/export-db.mjs",
     "postinstall": "prisma generate",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "tsx --test"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
@@ -39,6 +40,7 @@
     "eslint-config-next": "16.1.0",
     "prisma": "^6.19.1",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

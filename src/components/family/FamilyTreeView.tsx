@@ -1,5 +1,7 @@
 'use client';
 
+import { format } from 'date-fns';
+import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { getPersonDetails } from '@/actions/family';
 import { User as UserIcon, Heart, Plus, Share2, Edit2, X } from 'lucide-react';
@@ -22,9 +24,24 @@ type PersonLike = {
   title?: string | null;
   nickName?: string | null;
   dateOfBirth?: DateLike;
+  placeOfBirth?: string | null;
   dateOfDeath?: DateLike;
+  placeOfDeath?: string | null;
   photos?: PhotoLike[];
   isDivorced?: boolean;
+  familyId?: string;
+  marriageDate?: DateLike;
+  marriagePlace?: string | null;
+  marriageId?: string;
+  divorceDate?: DateLike;
+  divorcePlace?: string | null;
+  divorceId?: string;
+  reviewState?: {
+    conflictFields?: string[];
+    openLinkCount?: number;
+    needsReview?: boolean;
+    status?: 'clean' | 'linked' | 'needs_review';
+  };
 };
 
 type FamilyTreeData = {
@@ -34,7 +51,46 @@ type FamilyTreeData = {
   spouses: PersonLike[];
   children: PersonLike[];
   siblings: PersonLike[];
+  reviewSummary?: {
+    peopleWithConflicts: number;
+    peopleWithLinks: number;
+    totalConflictFields: number;
+    totalOpenLinks: number;
+  };
 };
+
+function formatDisplayDate(value: DateLike) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return format(date, 'dd-MMM-yyyy');
+}
+
+function isPersonDeceased(person: PersonLike) {
+  return Boolean(person.dateOfDeath);
+}
+
+function getLifeSummary(person: PersonLike) {
+  const born = formatDisplayDate(person.dateOfBirth);
+  const died = formatDisplayDate(person.dateOfDeath);
+
+  if (died) {
+    return `${born ? born : 'Date unknown'} — ${died}`;
+  }
+
+  if (born) {
+    return `Born: ${born}`;
+  }
+
+  return 'Living'
+}
+
+function getRelationshipSummary(person: PersonLike) {
+  if (person.isDivorced) {
+    return `Divorced${person.divorceDate ? ` • ${formatDisplayDate(person.divorceDate)}` : ''}`;
+  }
+  return `Married${person.marriageDate ? ` • ${formatDisplayDate(person.marriageDate)}` : ''}`;
+}
 
 export default function FamilyTreeView({ initialPersonId }: { initialPersonId: string }) {
   const [currentPersonId, setCurrentPersonId] = useState(initialPersonId);
@@ -98,9 +154,23 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
   if (!data) return <div className="flex h-96 items-center justify-center text-red-400">Person not found</div>;
 
   const { person, parents, spouses, children, siblings } = data;
+  const reviewSummary = data.reviewSummary;
 
   return (
     <div className="flex flex-col items-center gap-12 min-h-[600px] py-10">
+      {(reviewSummary?.totalConflictFields || reviewSummary?.totalOpenLinks) ? (
+        <div className="w-full max-w-5xl rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-amber-900">Review family updates</div>
+            <div className="text-xs text-amber-800">
+              {reviewSummary.totalConflictFields} field conflicts and {reviewSummary.totalOpenLinks} possible links need review.
+            </div>
+          </div>
+          <Link href="/dashboard/review" className="inline-flex items-center justify-center rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700">
+            Open review inbox
+          </Link>
+        </div>
+      ) : null}
       
       {/* --- Generation 1: Parents --- */}
       <div className="flex flex-col items-center relative">
@@ -146,14 +216,14 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
       
         {/* Main Focus Group */}
         <div className="flex flex-col items-center relative z-10">
-            <div className="flex items-center gap-6 p-6 bg-white rounded-2xl shadow-xl border border-indigo-50 ring-4 ring-indigo-50/50">
+            <div className={`flex items-center gap-6 p-6 rounded-2xl shadow-xl border ring-4 ${isPersonDeceased(person) ? 'bg-slate-50 border-slate-200 ring-slate-100' : 'bg-white border-indigo-50 ring-indigo-50/50'}`}>
                 
                 {/* Focal Person */}
-                <div className="flex flex-col items-center">
-                    <div className="w-24 h-24 bg-indigo-100 rounded-full flex items-center justify-center mb-3 overflow-hidden border-4 border-white shadow-md relative group">
+                <div className="flex flex-col items-center group">
+                    <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-3 overflow-hidden border-4 shadow-md relative group ${isPersonDeceased(person) ? 'bg-slate-200 border-slate-100' : 'bg-indigo-100 border-white'}`}>
                         {person.photos && person.photos.length > 0 ? (
                             <>
-                                <img src={person.photos[0].url} alt={person.firstName} className="w-full h-full object-cover" />
+                                <img src={person.photos[0].url} alt={person.firstName} className={`w-full h-full object-cover ${isPersonDeceased(person) ? 'grayscale' : ''}`} />
                                 {person.photos[0].date && (
                                     <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] text-center py-1">
                                         {new Date(person.photos[0].date).getFullYear()}
@@ -161,26 +231,42 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                                 )}
                             </>
                         ) : (
-                            <UserIcon size={40} className="text-indigo-400" />
+                            <UserIcon size={40} className={isPersonDeceased(person) ? 'text-slate-500' : 'text-indigo-400'} />
                         )}
-                        <button
-                            onClick={(e) => { e.stopPropagation(); handleEdit(person); }}
-                            className="absolute top-1 right-1 p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                            title="Edit"
-                        >
-                            <Edit2 size={16} />
-                        </button>
                     </div>
-                    <h2 className="text-2xl font-serif font-bold text-gray-800">{person.firstName} {person.lastName}</h2>
-                    <p className="text-sm text-indigo-600 font-medium mb-1">{person.title || ''}</p>
+                    <h2 className={`text-2xl font-serif font-bold ${isPersonDeceased(person) ? 'text-slate-800' : 'text-gray-800'}`}>{person.firstName} {person.lastName}</h2>
+                    <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
+                        {person.title ? (
+                          <p className={`text-sm font-medium ${isPersonDeceased(person) ? 'text-slate-600' : 'text-indigo-600'}`}>{person.title}</p>
+                        ) : null}
+                        {isPersonDeceased(person) ? (
+                          <span className="rounded-full bg-slate-200 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-700">
+                            In memory
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                            Living
+                          </span>
+                        )}
+                    </div>
                     {person.nickName && <p className="text-xs text-gray-500 italic">&quot;{person.nickName}&quot;</p>}
+                    <ReviewBadge person={person} />
                     
                     <div className="text-xs text-gray-400 mt-2 flex flex-col items-center gap-0.5">
-                        <span>{person.dateOfBirth ? `Born: ${new Date(person.dateOfBirth).toLocaleDateString()}` : 'No DOB'}</span>
-                        {person.dateOfDeath && <span className="text-gray-500">Died: {new Date(person.dateOfDeath).toLocaleDateString()}</span>}
+                        {isPersonDeceased(person) ? (
+                          <>
+                            <span className="text-slate-600">{getLifeSummary(person)}</span>
+                            {person.placeOfDeath ? <span className="text-gray-500">{person.placeOfDeath}</span> : null}
+                          </>
+                        ) : (
+                          <>
+                            <span>{person.dateOfBirth ? `Born: ${formatDisplayDate(person.dateOfBirth)}` : 'No DOB'}</span>
+                            {person.placeOfBirth ? <span className="text-gray-500">{person.placeOfBirth}</span> : null}
+                          </>
+                        )}
                     </div>
                     
-                    <div className="flex gap-2 mt-4 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                    <div className="flex gap-2 mt-4 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-200">
                         <button 
                             onClick={() => handleEdit(person)}
                             className="p-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors"
@@ -190,10 +276,11 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                         </button>
                         <button 
                             onClick={() => setShowInviteModal(true)}
-                            className="p-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors"
-                            title="Invite User"
+                            className="inline-flex items-center gap-2 px-3 py-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors"
+                            title="Invite to claim"
                         >
                             <Share2 size={16} />
+                            <span className="text-xs font-medium">Invite to claim</span>
                         </button>
                     </div>
                 </div>
@@ -205,17 +292,29 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                         <div className="flex gap-4">
                             {spouses.map((s: PersonLike) => (
                                 <div key={s.id} className="relative flex flex-col items-center group">
-                                    <div className="mb-2 text-xs text-red-300"><Heart size={16} fill="currentColor" /></div>
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); handleDivorce(s); }}
+                                        className="mb-2 flex flex-col items-center text-xs text-red-300 hover:text-red-400"
+                                        title="Edit relationship"
+                                    >
+                                        <Heart size={16} fill="currentColor" />
+                                        <span className={`mt-2 rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${s.isDivorced ? 'bg-red-100 text-red-600' : 'bg-rose-100 text-rose-600'}`}>
+                                            {getRelationshipSummary(s)}
+                                        </span>
+                                        {s.marriagePlace || s.divorcePlace ? (
+                                            <span className="mt-1 text-[10px] text-gray-500">
+                                                {s.isDivorced ? s.divorcePlace : s.marriagePlace}
+                                            </span>
+                                        ) : null}
+                                    </button>
                                     <PersonCard person={s} onClick={() => setCurrentPersonId(s.id)} onEdit={() => handleEdit(s)} />
-                                    {!s.isDivorced && (
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); handleDivorce(s); }}
-                                            className="absolute -top-2 -right-2 bg-white border border-red-200 text-red-500 rounded-full p-1 opacity-0 group-hover:opacity-100 hover:bg-red-50 shadow-sm transition-all"
-                                            title="Record Divorce"
-                                        >
-                                            <X size={12} />
-                                        </button>
-                                    )}
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); handleDivorce(s); }}
+                                        className="absolute -top-2 -right-2 bg-white border border-red-200 text-red-500 rounded-full p-1 opacity-0 group-hover:opacity-100 hover:bg-red-50 shadow-sm transition-all"
+                                        title={s.isDivorced ? 'Edit relationship' : 'Record divorce'}
+                                    >
+                                        <X size={12} />
+                                    </button>
                                 </div>
                             ))}
                         </div>
@@ -293,14 +392,17 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
 }
 
 function PersonCard({ person, onClick, onEdit, compact }: { person: PersonLike, onClick: () => void, onEdit?: () => void, compact?: boolean }) {
+    const deceased = isPersonDeceased(person)
+
     return (
         <div 
             onClick={onClick}
             className={`
-                group cursor-pointer bg-white border border-gray-200 rounded-xl transition-all duration-200 
+                group cursor-pointer border rounded-xl transition-all duration-200 
                 flex flex-col items-center shadow-sm hover:shadow-md hover:border-indigo-300 hover:-translate-y-1 relative
                 ${compact ? 'p-2 w-24' : 'p-4 w-36'} 
-                ${person.isDivorced ? 'opacity-70 border-dashed bg-gray-50' : ''}
+                ${deceased ? 'bg-slate-50 border-slate-200' : 'bg-white border-gray-200'}
+                ${person.isDivorced ? 'opacity-70 border-dashed' : ''}
             `}
         >
             {onEdit && (
@@ -313,14 +415,15 @@ function PersonCard({ person, onClick, onEdit, compact }: { person: PersonLike, 
                 </button>
             )}
             <div className={`
-                rounded-full bg-gray-100 flex items-center justify-center 
+                rounded-full flex items-center justify-center 
                 ${compact ? 'w-10 h-10' : 'w-16 h-16'} 
                 mb-3 overflow-hidden relative border-2 border-white shadow-inner
+                ${deceased ? 'bg-slate-200' : 'bg-gray-100'}
             `}>
                 {person.photos && person.photos.length > 0 ? (
-                    <img src={person.photos[0].url} alt={person.firstName} className="w-full h-full object-cover" />
+                    <img src={person.photos[0].url} alt={person.firstName} className={`w-full h-full object-cover ${deceased ? 'grayscale' : ''}`} />
                 ) : (
-                    <UserIcon size={compact ? 20 : 28} className="text-gray-400" />
+                    <UserIcon size={compact ? 20 : 28} className={deceased ? 'text-slate-500' : 'text-gray-400'} />
                 )}
                 {person.isDivorced && (
                     <div className="absolute inset-0 bg-black/10 flex items-center justify-center">
@@ -329,14 +432,38 @@ function PersonCard({ person, onClick, onEdit, compact }: { person: PersonLike, 
                 )}
             </div>
             
-            <div className={`font-serif font-bold text-gray-800 text-center truncate w-full ${compact ? 'text-xs' : 'text-sm'}`}>
+            <div className={`font-serif font-bold text-center truncate w-full ${compact ? 'text-xs' : 'text-sm'} ${deceased ? 'text-slate-800' : 'text-gray-800'}`}>
                 {person.firstName}
             </div>
             {!compact && <div className="text-xs text-gray-500 truncate w-full text-center mt-0.5">{person.lastName}</div>}
+            {deceased ? (
+                <div className="mt-2 rounded-full bg-slate-200 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-700">
+                    In memory
+                </div>
+            ) : null}
+            <ReviewBadge person={person} compact={compact} />
             
             {person.isDivorced && <div className="text-[10px] text-red-400 font-bold uppercase mt-2 tracking-wide">Divorced</div>}
         </div>
     );
+}
+
+function ReviewBadge({ person, compact }: { person: PersonLike; compact?: boolean }) {
+    if (!person.reviewState?.needsReview && !person.reviewState?.openLinkCount) return null
+
+    if (person.reviewState?.status === 'needs_review') {
+        return (
+            <div className={`mt-2 rounded-full bg-amber-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700 ${compact ? '' : ''}`}>
+                Needs review
+            </div>
+        )
+    }
+
+    return (
+        <div className="mt-2 rounded-full bg-blue-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-blue-700">
+            Linked
+        </div>
+    )
 }
 
 function AddButton({ onClick, label, small }: { onClick: () => void, label: string, small?: boolean }) {

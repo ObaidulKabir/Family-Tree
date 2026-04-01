@@ -39,15 +39,50 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
   callbacks: {
     async session({ session, token }) {
-      if (token.sub && session.user) {
-        session.user.id = token.sub;
+      if (session.user) {
+        if (token.sub) {
+          session.user.id = token.sub;
+        } else if (token.email) {
+          const existingUser = await prisma.user.findUnique({
+            where: { email: token.email },
+            select: { id: true },
+          })
+
+          if (existingUser) {
+            session.user.id = existingUser.id
+          }
+        }
       }
       return session;
     },
     async jwt({ token, user }) {
         if (user) {
             token.sub = user.id
+            return token
         }
+
+        if (token.sub) {
+          const existingById = await prisma.user.findUnique({
+            where: { id: token.sub },
+            select: { id: true },
+          })
+
+          if (existingById) {
+            return token
+          }
+        }
+
+        if (token.email) {
+          const existingByEmail = await prisma.user.findUnique({
+            where: { email: token.email },
+            select: { id: true },
+          })
+
+          if (existingByEmail) {
+            token.sub = existingByEmail.id
+          }
+        }
+
         return token
     }
   },

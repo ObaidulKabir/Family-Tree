@@ -2,6 +2,7 @@
 
 import { prisma } from '@/lib/prisma'
 import { auth } from '@/auth'
+import { createPersonClaims, upsertUserPersonLink } from '@/lib/graph'
 import type { Prisma } from '@prisma/client'
 import { randomBytes } from 'crypto'
 
@@ -65,114 +66,88 @@ export async function acceptInvitation(token: string) {
         const targetPersonId = invitation.personId; // The node we are claiming
         const sourcePersonId = user.rootPersonId;   // The user's current node (if any)
 
-        // Scenario 1: User has no existing tree (no root person)
-        if (!sourcePersonId) {
-            // Just link
+        await upsertUserPersonLink(tx, {
+            userId,
+            personId: targetPersonId,
+            role: 'SELF',
+            status: 'ACTIVE',
+            assertedDistance: 0,
+            computedDistance: 0,
+            invitedByUserId: invitation.inviterId,
+            invitationId: invitation.id,
+        });
+
+        await createPersonClaims(tx, {
+            personId: targetPersonId,
+            contributorId: user.id,
+            sourceType: 'INVITATION_CONFIRMATION',
+            sourceRefId: invitation.id,
+            assertedDistance: 0,
+            computedDistance: 0,
+            values: {
+                firstName: invitation.person.firstName,
+                lastName: invitation.person.lastName ?? null,
+                middleName: invitation.person.middleName ?? null,
+                nickName: invitation.person.nickName ?? null,
+                title: invitation.person.title ?? null,
+                gender: invitation.person.gender ?? null,
+                dateOfBirth: invitation.person.dateOfBirth ?? null,
+                placeOfBirth: invitation.person.placeOfBirth ?? null,
+                dateOfDeath: invitation.person.dateOfDeath ?? null,
+                placeOfDeath: invitation.person.placeOfDeath ?? null,
+            },
+        });
+
+        if (!invitation.person.linkedUserId || invitation.person.linkedUserId === user.id) {
             await tx.person.update({
                 where: { id: targetPersonId },
                 data: { linkedUserId: user.id }
             });
-            await tx.user.update({
-                where: { id: user.id },
-                data: { rootPersonId: targetPersonId }
-            });
-        } 
-        // Scenario 2: User has an existing tree and it's different from target
-        else if (sourcePersonId !== targetPersonId) {
-            const sourcePerson = await tx.person.findUnique({
-                where: { id: sourcePersonId },
-                include: {
-                    familiesAsParent1: true,
-                    familiesAsParent2: true,
-                    childOfFamily: true,
-                    events: true,
-                    photos: true
-                }
-            });
-            
-            if (sourcePerson) {
-                const targetPerson = await tx.person.findUnique({ where: { id: targetPersonId } });
-                
-                // A. Move Parents (if Target has none)
-                if (sourcePerson.childOfFamilyId && !targetPerson?.childOfFamilyId) {
-                    await tx.person.update({
-                        where: { id: targetPersonId },
-                        data: { childOfFamilyId: sourcePerson.childOfFamilyId }
-                    });
-                }
-                // Note: If both have parents, we prioritize Target's parents. 
-                // Source's relationship to parents is lost (but parents remain in DB).
-
-                // B. Move Families where Source is Parent1
-                for (const family of sourcePerson.familiesAsParent1) {
-                    // Check if Target is already Parent1 in this family? No, family is unique entity.
-                    // But check if Target already has a family with the SAME spouse?
-                    // For MVP, we just move the family pointer.
-                    await tx.family.update({
-                        where: { id: family.id },
-                        data: { parent1Id: targetPersonId }
-                    });
-                }
-
-                // C. Move Families where Source is Parent2
-                for (const family of sourcePerson.familiesAsParent2) {
-                    await tx.family.update({
-                        where: { id: family.id },
-                        data: { parent2Id: targetPersonId }
-                    });
-                }
-
-                // D. Move Events
-                for (const event of sourcePerson.events) {
-                    await tx.familyEvent.update({
-                        where: { id: event.id },
-                        data: { personId: targetPersonId }
-                    });
-                }
-
-                // E. Move Photos
-                for (const photo of sourcePerson.photos) {
-                    await tx.photo.update({
-                        where: { id: photo.id },
-                        data: { personId: targetPersonId }
-                    });
-                }
-                
-                // F. Update User to point to Target
-                await tx.user.update({
-                    where: { id: user.id },
-                    data: { rootPersonId: targetPersonId }
-                });
-
-                // G. Link Target to User
-                await tx.person.update({
-                    where: { id: targetPersonId },
-                    data: { linkedUserId: user.id }
-                });
-
-                // H. Create Layer from Source Person Data (Preserve History)
-                await tx.personLayer.create({
-                    data: {
-                        personId: targetPersonId,
-                        firstName: sourcePerson.firstName,
-                        lastName: sourcePerson.lastName,
-                        middleName: sourcePerson.middleName,
-                        nickName: sourcePerson.nickName,
-                        title: sourcePerson.title,
-                        gender: sourcePerson.gender,
-                        dateOfBirth: sourcePerson.dateOfBirth,
-                        placeOfBirth: sourcePerson.placeOfBirth,
-                        dateOfDeath: sourcePerson.dateOfDeath,
-                        placeOfDeath: sourcePerson.placeOfDeath,
-                        contributorId: user.id,
-                        relationshipDistance: 0 // Self claiming
-                    }
-                });
-
-                // I. Delete Source Person
-                await tx.person.delete({ where: { id: sourcePersonId } });
-            }
         }
+
+        if (sourcePersonId && sourcePersonId !== targetPersonId) {
+            const [leftPersonId, rightPersonId] = [sourcePersonId, targetPersonId].sort()
+
+            await tx.personLink.upsert({
+                where: {
+                    leftPersonId_rightPersonId: {
+                        leftPersonId,
+                        rightPersonId,
+                    },
+                },
+                update: {
+                    linkType: 'VERIFIED_SAME',
+                    sourceType: 'INVITATION',
+                    confidenceScore: 1,
+                    resolutionStatus: 'ACCEPTED',
+                    createdByUserId: invitation.inviterId,
+                },
+                create: {
+                    leftPersonId,
+                    rightPersonId,
+                    linkType: 'VERIFIED_SAME',
+                    sourceType: 'INVITATION',
+                    confidenceScore: 1,
+                    resolutionStatus: 'ACCEPTED',
+                    createdByUserId: invitation.inviterId,
+                },
+            })
+
+            await tx.userPersonLink.updateMany({
+                where: {
+                    userId,
+                    personId: sourcePersonId,
+                },
+                data: {
+                    status: 'LINKED',
+                },
+            })
+        }
+
+        await tx.user.update({
+            where: { id: user.id },
+            data: { rootPersonId: targetPersonId }
+        });
 
         // Update invitation status
         await tx.invitation.update({

@@ -3,18 +3,24 @@
 import { register } from '@/actions/auth';
 import { useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 
 export default function RegisterForm() {
   const [error, setError] = useState<string | null>(null);
+  const searchParams = useSearchParams()
+
+  const rawCallbackUrl = searchParams.get('callbackUrl')
+  const callbackUrl = rawCallbackUrl && rawCallbackUrl.startsWith('/') ? rawCallbackUrl : null
 
   const handleSubmit = async (formData: FormData) => {
     setError(null);
     try {
+      if (callbackUrl) formData.set('callbackUrl', callbackUrl)
       const result = await register(formData);
       if (result?.error) {
         setError(result.error);
       }
-    } catch (e) {
+    } catch {
         // Redirects might be thrown as errors, but usually server action handles it.
         // If we are here, it might be a real error or the redirect error if not handled by framework?
         // Actually nextjs handles redirect errors from server actions automatically if not caught.
@@ -63,7 +69,18 @@ export default function RegisterForm() {
         </button>
       </form>
       <div className="text-center">
-        <p className="text-sm">Already have an account? <Link href="/login" className="text-indigo-600 hover:underline">Login</Link></p>
+        <p className="text-sm">
+          Already have an account?{' '}
+          <Link href={callbackUrl ? `/login?callbackUrl=${encodeURIComponent(callbackUrl)}` : '/login'} className="text-indigo-600 hover:underline">
+            Login
+          </Link>
+        </p>
+        <p className="text-sm mt-2">
+          Have an invite?{' '}
+          <Link href="/invite" className="text-indigo-600 hover:underline">
+            Open invitation page
+          </Link>
+        </p>
       </div>
     </div>
   );

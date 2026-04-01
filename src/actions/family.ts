@@ -2,6 +2,8 @@
 
 import { prisma } from '@/lib/prisma'
 import { auth } from '@/auth'
+import { computeRelationshipDistance, createPersonClaims, createRelationshipClaim, upsertUserPersonLink } from '@/lib/graph'
+import { buildPersonReviewState, groupClaimsByPerson, resolvePersonFromClaims, summarizeReviewQueue } from '@/lib/resolution'
 import { revalidatePath } from 'next/cache'
 
 export async function getPersonDetails(personId: string) {
@@ -12,26 +14,58 @@ export async function getPersonDetails(personId: string) {
     where: { id: personId },
     include: {
         events: true, 
-        photos: true,
+        photos: { orderBy: { createdAt: 'desc' } },
         childOfFamily: {
             include: {
-                parent1: true,
-                parent2: true
+                parent1: {
+                    include: {
+                        photos: { orderBy: { createdAt: 'desc' } }
+                    }
+                },
+                parent2: {
+                    include: {
+                        photos: { orderBy: { createdAt: 'desc' } }
+                    }
+                }
             }
         },
         familiesAsParent1: {
             include: {
-                parent1: true,
-                parent2: true,
-                children: true,
+                parent1: {
+                    include: {
+                        photos: { orderBy: { createdAt: 'desc' } }
+                    }
+                },
+                parent2: {
+                    include: {
+                        photos: { orderBy: { createdAt: 'desc' } }
+                    }
+                },
+                children: {
+                    include: {
+                        photos: { orderBy: { createdAt: 'desc' } }
+                    }
+                },
                 events: true
             }
         },
         familiesAsParent2: {
             include: {
-                parent1: true,
-                parent2: true,
-                children: true,
+                parent1: {
+                    include: {
+                        photos: { orderBy: { createdAt: 'desc' } }
+                    }
+                },
+                parent2: {
+                    include: {
+                        photos: { orderBy: { createdAt: 'desc' } }
+                    }
+                },
+                children: {
+                    include: {
+                        photos: { orderBy: { createdAt: 'desc' } }
+                    }
+                },
                 events: true
             }
         }
@@ -41,7 +75,7 @@ export async function getPersonDetails(personId: string) {
   if (!person) return { error: "Person not found" }
 
   // Parents
-  const parents: unknown[] = [];
+  const parents: Array<Record<string, unknown> & { id: string }> = [];
   if (person.childOfFamily) {
       if (person.childOfFamily.parent1) parents.push(person.childOfFamily.parent1);
       if (person.childOfFamily.parent2) parents.push(person.childOfFamily.parent2);
@@ -63,33 +97,94 @@ export async function getPersonDetails(personId: string) {
           ...spouse, 
           familyId: f.id,
           marriageDate: marriageEvent?.date,
+          marriagePlace: marriageEvent?.place,
           marriageId: marriageEvent?.id,
           isDivorced: !!divorceEvent,
-          divorceDate: divorceEvent?.date
+          divorceDate: divorceEvent?.date,
+          divorcePlace: divorceEvent?.place,
+          divorceId: divorceEvent?.id
       };
-  }).filter(Boolean);
+  }).filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null);
 
   // Children
   const children = allFamilies.flatMap(f => f.children);
 
   // Siblings
-  let siblings: unknown[] = [];
+  let siblings: Array<Record<string, unknown> & { id: string }> = [];
   if (person.childOfFamilyId) {
       const family = await prisma.family.findUnique({
           where: { id: person.childOfFamilyId },
-          include: { children: true }
+          include: {
+              children: {
+                  include: {
+                      photos: { orderBy: { createdAt: 'desc' } }
+                  }
+              }
+          }
       });
       if (family) {
           siblings = family.children.filter((c: { id: string }) => c.id !== person.id);
       }
   }
 
-  return {
+  const relatedPeople = [
       person,
-      parents,
-      spouses,
-      children,
-      siblings
+      ...parents,
+      ...spouses,
+      ...children,
+      ...siblings
+  ].filter((candidate): candidate is { id: string } => Boolean(candidate && typeof candidate === 'object' && 'id' in candidate))
+
+  const uniquePersonIds = [...new Set(relatedPeople.map((candidate) => candidate.id))]
+
+  const claims = await prisma.personClaim.findMany({
+      where: {
+          personId: { in: uniquePersonIds },
+          resolutionStatus: { not: 'REJECTED' }
+      },
+      orderBy: { createdAt: 'asc' }
+  })
+
+  const personLinks = await prisma.personLink.findMany({
+      where: {
+          OR: [
+              { leftPersonId: { in: uniquePersonIds } },
+              { rightPersonId: { in: uniquePersonIds } }
+          ]
+      }
+  })
+
+  const claimsByPerson = groupClaimsByPerson(claims)
+  const resolvePerson = <TPerson extends { id: string }>(candidate: TPerson) => {
+      const relatedLinks = personLinks.filter((link) => link.leftPersonId === candidate.id || link.rightPersonId === candidate.id)
+      const reviewState = buildPersonReviewState(claimsByPerson[candidate.id] ?? [], relatedLinks)
+      return {
+          ...resolvePersonFromClaims(candidate, claimsByPerson[candidate.id] ?? []),
+          reviewState
+      }
+  }
+
+  const resolvedPerson = resolvePerson(person)
+  const resolvedParents = parents.map((candidate) => resolvePerson(candidate))
+  const resolvedSpouses = spouses.map((candidate) => resolvePerson(candidate))
+  const resolvedChildren = children.map((candidate) => resolvePerson(candidate))
+  const resolvedSiblings = siblings.map((candidate) => resolvePerson(candidate))
+
+  const reviewSummary = summarizeReviewQueue([
+      resolvedPerson,
+      ...resolvedParents,
+      ...resolvedSpouses,
+      ...resolvedChildren,
+      ...resolvedSiblings
+  ])
+
+  return {
+      person: resolvedPerson,
+      parents: resolvedParents,
+      spouses: resolvedSpouses,
+      children: resolvedChildren,
+      siblings: resolvedSiblings,
+      reviewSummary
   };
 }
 
@@ -104,97 +199,194 @@ export async function addPerson(
     const userId = session.user.id;
 
     try {
-        const newPerson = await prisma.person.create({
-            data: {
-                firstName: data.firstName,
-                lastName: data.lastName,
-                gender: data.gender,
-                dateOfBirth: data.dateOfBirth,
-                placeOfBirth: data.placeOfBirth,
-                createdById: userId
-            }
-        });
-
-        // Create Initial Layer
-        await prisma.personLayer.create({
-            data: {
-                personId: newPerson.id,
-                firstName: data.firstName,
-                lastName: data.lastName,
-                gender: data.gender,
-                dateOfBirth: data.dateOfBirth,
-                placeOfBirth: data.placeOfBirth,
-                contributorId: userId,
-                relationshipDistance: 0,
-                confidenceScore: 1.0
-            }
-        });
-
-        if (relationType === 'PARENT') {
-            // relationToId is the CHILD. We are adding a PARENT.
-            const child = await prisma.person.findUnique({
-                where: { id: relationToId },
-                include: { childOfFamily: true }
+        const newPerson = await prisma.$transaction(async (tx) => {
+            const createdPerson = await tx.person.create({
+                data: {
+                    firstName: data.firstName,
+                    lastName: data.lastName,
+                    gender: data.gender,
+                    dateOfBirth: data.dateOfBirth,
+                    placeOfBirth: data.placeOfBirth,
+                    createdById: userId
+                }
             });
 
-            if (child) {
+            if (relationType === 'PARENT') {
+                const child = await tx.person.findUnique({
+                    where: { id: relationToId },
+                    include: { childOfFamily: true }
+                });
+
+                if (!child) {
+                    throw new Error("Child not found");
+                }
+
                 if (child.childOfFamily) {
                     const family = child.childOfFamily;
                     if (!family.parent1Id) {
-                        await prisma.family.update({
+                        await tx.family.update({
                             where: { id: family.id },
-                            data: { parent1Id: newPerson.id }
+                            data: { parent1Id: createdPerson.id }
                         });
                     } else if (!family.parent2Id) {
-                        await prisma.family.update({
+                        await tx.family.update({
                             where: { id: family.id },
-                            data: { parent2Id: newPerson.id }
+                            data: { parent2Id: createdPerson.id }
                         });
                     } else {
-                         return { error: "Both parents already defined" };
+                        throw new Error("Both parents already defined");
                     }
                 } else {
-                    // Create new family
-                    await prisma.family.create({
+                    await tx.family.create({
                         data: {
-                            parent1Id: newPerson.id,
+                            parent1Id: createdPerson.id,
                             children: { connect: { id: child.id } }
                         }
                     });
                 }
+
+                const distance = await computeRelationshipDistance(tx, userId, createdPerson.id);
+
+                await createRelationshipClaim(tx, {
+                    fromPersonId: createdPerson.id,
+                    toPersonId: child.id,
+                    relationshipType: 'BIO_PARENT',
+                    contributorId: userId,
+                    computedDistance: distance,
+                });
+                await createRelationshipClaim(tx, {
+                    fromPersonId: child.id,
+                    toPersonId: createdPerson.id,
+                    relationshipType: 'CHILD',
+                    contributorId: userId,
+                    computedDistance: distance,
+                });
+
+                await tx.personLayer.create({
+                    data: {
+                        personId: createdPerson.id,
+                        firstName: data.firstName,
+                        lastName: data.lastName,
+                        gender: data.gender,
+                        dateOfBirth: data.dateOfBirth,
+                        placeOfBirth: data.placeOfBirth,
+                        contributorId: userId,
+                        relationshipDistance: distance ?? undefined,
+                        confidenceScore: 1.0
+                    }
+                });
+
+                await createPersonClaims(tx, {
+                    personId: createdPerson.id,
+                    contributorId: userId,
+                    sourceType: 'USER',
+                    computedDistance: distance,
+                    values: {
+                        firstName: data.firstName,
+                        lastName: data.lastName ?? null,
+                        gender: data.gender ?? null,
+                        dateOfBirth: data.dateOfBirth ?? null,
+                        placeOfBirth: data.placeOfBirth ?? null,
+                    },
+                });
+
+                await upsertUserPersonLink(tx, {
+                    userId,
+                    personId: createdPerson.id,
+                    role: 'CONTRIBUTOR',
+                    status: 'ACTIVE',
+                    computedDistance: distance,
+                });
+
+                return createdPerson;
             }
-        } else if (relationType === 'CHILD') {
-            // relationToId is the PARENT. We are adding a CHILD.
-            const parent = await prisma.person.findUnique({
-                where: { id: relationToId },
-                include: { familiesAsParent1: true, familiesAsParent2: true }
-            });
-            
-            if (parent) {
+
+            if (relationType === 'CHILD') {
+                const parent = await tx.person.findUnique({
+                    where: { id: relationToId },
+                    include: { familiesAsParent1: true, familiesAsParent2: true }
+                });
+
+                if (!parent) {
+                    throw new Error("Parent not found");
+                }
+
                 const families = [...parent.familiesAsParent1, ...parent.familiesAsParent2];
-                
+
                 if (families.length > 0) {
-                    // Add to the first found family (simplification)
-                    await prisma.family.update({
+                    await tx.family.update({
                         where: { id: families[0].id },
-                        data: { children: { connect: { id: newPerson.id } } }
+                        data: { children: { connect: { id: createdPerson.id } } }
                     });
                 } else {
-                    // Create new family
-                    await prisma.family.create({
+                    await tx.family.create({
                         data: {
                             parent1Id: parent.id,
-                            children: { connect: { id: newPerson.id } }
+                            children: { connect: { id: createdPerson.id } }
                         }
                     });
                 }
+
+                const distance = await computeRelationshipDistance(tx, userId, createdPerson.id);
+
+                await createRelationshipClaim(tx, {
+                    fromPersonId: parent.id,
+                    toPersonId: createdPerson.id,
+                    relationshipType: 'BIO_PARENT',
+                    contributorId: userId,
+                    computedDistance: distance,
+                });
+                await createRelationshipClaim(tx, {
+                    fromPersonId: createdPerson.id,
+                    toPersonId: parent.id,
+                    relationshipType: 'CHILD',
+                    contributorId: userId,
+                    computedDistance: distance,
+                });
+
+                await tx.personLayer.create({
+                    data: {
+                        personId: createdPerson.id,
+                        firstName: data.firstName,
+                        lastName: data.lastName,
+                        gender: data.gender,
+                        dateOfBirth: data.dateOfBirth,
+                        placeOfBirth: data.placeOfBirth,
+                        contributorId: userId,
+                        relationshipDistance: distance ?? undefined,
+                        confidenceScore: 1.0
+                    }
+                });
+
+                await createPersonClaims(tx, {
+                    personId: createdPerson.id,
+                    contributorId: userId,
+                    sourceType: 'USER',
+                    computedDistance: distance,
+                    values: {
+                        firstName: data.firstName,
+                        lastName: data.lastName ?? null,
+                        gender: data.gender ?? null,
+                        dateOfBirth: data.dateOfBirth ?? null,
+                        placeOfBirth: data.placeOfBirth ?? null,
+                    },
+                });
+
+                await upsertUserPersonLink(tx, {
+                    userId,
+                    personId: createdPerson.id,
+                    role: 'CONTRIBUTOR',
+                    status: 'ACTIVE',
+                    computedDistance: distance,
+                });
+
+                return createdPerson;
             }
-        } else if (relationType === 'SPOUSE') {
-            // Create a new Family with both
-            await prisma.family.create({
+
+            await tx.family.create({
                 data: {
                     parent1Id: relationToId,
-                    parent2Id: newPerson.id,
+                    parent2Id: createdPerson.id,
                     events: data.marriageDate ? {
                         create: {
                             type: 'MARRIAGE',
@@ -203,13 +395,71 @@ export async function addPerson(
                     } : undefined
                 }
             });
-        }
-        
+
+            const distance = await computeRelationshipDistance(tx, userId, createdPerson.id);
+
+            await createRelationshipClaim(tx, {
+                fromPersonId: relationToId,
+                toPersonId: createdPerson.id,
+                relationshipType: 'SPOUSE',
+                contributorId: userId,
+                computedDistance: distance,
+            });
+            await createRelationshipClaim(tx, {
+                fromPersonId: createdPerson.id,
+                toPersonId: relationToId,
+                relationshipType: 'SPOUSE',
+                contributorId: userId,
+                computedDistance: distance,
+            });
+
+            await tx.personLayer.create({
+                data: {
+                    personId: createdPerson.id,
+                    firstName: data.firstName,
+                    lastName: data.lastName,
+                    gender: data.gender,
+                    dateOfBirth: data.dateOfBirth,
+                    placeOfBirth: data.placeOfBirth,
+                    contributorId: userId,
+                    relationshipDistance: distance ?? undefined,
+                    confidenceScore: 1.0
+                }
+            });
+
+            await createPersonClaims(tx, {
+                personId: createdPerson.id,
+                contributorId: userId,
+                sourceType: 'USER',
+                computedDistance: distance,
+                values: {
+                    firstName: data.firstName,
+                    lastName: data.lastName ?? null,
+                    gender: data.gender ?? null,
+                    dateOfBirth: data.dateOfBirth ?? null,
+                    placeOfBirth: data.placeOfBirth ?? null,
+                },
+            });
+
+            await upsertUserPersonLink(tx, {
+                userId,
+                personId: createdPerson.id,
+                role: 'CONTRIBUTOR',
+                status: 'ACTIVE',
+                computedDistance: distance,
+            });
+
+            return createdPerson;
+        });
+
         revalidatePath('/dashboard');
         return { success: true, person: newPerson };
 
     } catch (error) {
         console.error(error);
+        if (error instanceof Error && error.message) {
+            return { error: error.message };
+        }
         return { error: "Failed to add person" };
     }
 }
@@ -229,6 +479,8 @@ export async function updatePerson(
         title?: string;
         photoUrl?: string;
         photoDate?: Date;
+        replacePhoto?: boolean;
+        removePhoto?: boolean;
     }
 ) {
     const session = await auth();
@@ -240,96 +492,146 @@ export async function updatePerson(
     if (!person) return { error: "Person not found" };
     
     try {
-        // Create History Layer
-        const distance = (person.createdById === userId || person.linkedUserId === userId) ? 0 : 5;
-        
-        await prisma.personLayer.create({
-            data: {
-                personId: personId,
-                firstName: data.firstName,
-                lastName: data.lastName,
-                middleName: data.middleName,
-                nickName: data.nickName,
-                gender: data.gender,
-                dateOfBirth: data.dateOfBirth,
-                placeOfBirth: data.placeOfBirth,
-                dateOfDeath: data.dateOfDeath,
-                placeOfDeath: data.placeOfDeath,
-                title: data.title,
-                contributorId: userId,
-                relationshipDistance: distance
-            }
-        });
+        const distance = await computeRelationshipDistance(prisma, userId, personId);
 
-        await prisma.person.update({
-            where: { id: personId },
-            data: {
-                firstName: data.firstName,
-                lastName: data.lastName,
-                middleName: data.middleName,
-                nickName: data.nickName,
-                gender: data.gender,
-                dateOfBirth: data.dateOfBirth,
-                placeOfBirth: data.placeOfBirth,
-                dateOfDeath: data.dateOfDeath,
-                placeOfDeath: data.placeOfDeath,
-                title: data.title
-            }
-        });
-        
-        // Handle Death Event
-        if (data.dateOfDeath) {
-            const deathEvent = await prisma.familyEvent.findFirst({
-                where: {
-                    type: 'DEATH',
-                    personId: personId
-                }
-            });
-
-            if (deathEvent) {
-                await prisma.familyEvent.update({
-                    where: { id: deathEvent.id },
-                    data: {
-                        date: data.dateOfDeath,
-                        place: data.placeOfDeath
-                    }
-                });
-            } else {
-                await prisma.familyEvent.create({
-                    data: {
-                        type: 'DEATH',
-                        personId: personId,
-                        date: data.dateOfDeath,
-                        place: data.placeOfDeath
-                    }
-                });
-            }
-        }
-        
-        if (data.photoUrl) {
-            await prisma.photo.create({
+        await prisma.$transaction(async (tx) => {
+            await tx.personLayer.create({
                 data: {
-                    url: data.photoUrl,
                     personId: personId,
-                    date: data.photoDate
+                    firstName: data.firstName,
+                    lastName: data.lastName,
+                    middleName: data.middleName,
+                    nickName: data.nickName,
+                    gender: data.gender,
+                    dateOfBirth: data.dateOfBirth,
+                    placeOfBirth: data.placeOfBirth,
+                    dateOfDeath: data.dateOfDeath,
+                    placeOfDeath: data.placeOfDeath,
+                    title: data.title,
+                    contributorId: userId,
+                    relationshipDistance: distance ?? undefined
                 }
             });
-        }
-        
+
+            await createPersonClaims(tx, {
+                personId,
+                contributorId: userId,
+                sourceType: 'USER',
+                computedDistance: distance,
+                values: {
+                    firstName: data.firstName,
+                    lastName: data.lastName ?? null,
+                    middleName: data.middleName ?? null,
+                    nickName: data.nickName ?? null,
+                    gender: data.gender ?? null,
+                    dateOfBirth: data.dateOfBirth ?? null,
+                    placeOfBirth: data.placeOfBirth ?? null,
+                    dateOfDeath: data.dateOfDeath ?? null,
+                    placeOfDeath: data.placeOfDeath ?? null,
+                    title: data.title ?? null,
+                },
+            });
+
+            await upsertUserPersonLink(tx, {
+                userId,
+                personId,
+                role: distance === 0 ? 'SELF' : 'CONTRIBUTOR',
+                status: 'ACTIVE',
+                computedDistance: distance,
+            });
+
+            await tx.person.update({
+                where: { id: personId },
+                data: {
+                    firstName: data.firstName,
+                    lastName: data.lastName,
+                    middleName: data.middleName,
+                    nickName: data.nickName,
+                    gender: data.gender,
+                    dateOfBirth: data.dateOfBirth,
+                    placeOfBirth: data.placeOfBirth,
+                    dateOfDeath: data.dateOfDeath,
+                    placeOfDeath: data.placeOfDeath,
+                    title: data.title
+                }
+            });
+            
+            if (data.dateOfDeath) {
+                const deathEvent = await tx.familyEvent.findFirst({
+                    where: {
+                        type: 'DEATH',
+                        personId: personId
+                    }
+                });
+
+                if (deathEvent) {
+                    await tx.familyEvent.update({
+                        where: { id: deathEvent.id },
+                        data: {
+                            date: data.dateOfDeath,
+                            place: data.placeOfDeath
+                        }
+                    });
+                } else {
+                    await tx.familyEvent.create({
+                        data: {
+                            type: 'DEATH',
+                            personId: personId,
+                            date: data.dateOfDeath,
+                            place: data.placeOfDeath
+                        }
+                    });
+                }
+            }
+            
+            if (data.removePhoto) {
+                await tx.photo.deleteMany({
+                    where: { personId }
+                });
+            }
+
+            if (data.photoUrl) {
+                if (data.replacePhoto !== false) {
+                    await tx.photo.deleteMany({
+                        where: { personId }
+                    });
+                }
+
+                await tx.photo.create({
+                    data: {
+                        url: data.photoUrl,
+                        personId: personId,
+                        date: data.photoDate
+                    }
+                });
+            }
+        });
+
         revalidatePath('/dashboard');
         return { success: true };
     } catch (error) {
+        console.error(error);
         return { error: "Failed to update person" };
     }
 }
 
-export async function divorceSpouse(personId: string, spouseId: string, divorceDate?: Date) {
+export async function updateRelationship(
+    personId: string,
+    spouseId: string,
+    data: {
+        status: 'MARRIED' | 'DIVORCED';
+        marriageDate?: Date;
+        marriagePlace?: string;
+        divorceDate?: Date;
+        divorcePlace?: string;
+    }
+) {
     const session = await auth();
     if (!session?.user) return { error: "Unauthorized" };
     if (!session.user.id) return { error: "Unauthorized" };
+    const userId = session.user.id;
 
     try {
-        // Find the family
         const family = await prisma.family.findFirst({
             where: {
                 OR: [
@@ -341,17 +643,92 @@ export async function divorceSpouse(personId: string, spouseId: string, divorceD
 
         if (!family) return { error: "Marriage not found" };
 
-        await prisma.familyEvent.create({
-            data: {
-                type: 'DIVORCE',
-                familyId: family.id,
-                date: divorceDate
+        if (data.divorceDate && data.marriageDate && data.divorceDate < data.marriageDate) {
+            return { error: "Divorce date cannot be earlier than marriage date" };
+        }
+
+        await prisma.$transaction(async (tx) => {
+            const existingEvents = await tx.familyEvent.findMany({
+                where: {
+                    familyId: family.id,
+                    type: { in: ['MARRIAGE', 'DIVORCE'] }
+                }
+            });
+
+            const marriageEvent = existingEvents.find((event) => event.type === 'MARRIAGE');
+            const divorceEvent = existingEvents.find((event) => event.type === 'DIVORCE');
+
+            if (marriageEvent) {
+                await tx.familyEvent.update({
+                    where: { id: marriageEvent.id },
+                    data: {
+                        date: data.marriageDate,
+                        place: data.marriagePlace || null
+                    }
+                });
+            } else if (data.marriageDate || data.marriagePlace) {
+                await tx.familyEvent.create({
+                    data: {
+                        type: 'MARRIAGE',
+                        familyId: family.id,
+                        date: data.marriageDate,
+                        place: data.marriagePlace
+                    }
+                });
+            }
+
+            if (data.status === 'DIVORCED') {
+                if (divorceEvent) {
+                    await tx.familyEvent.update({
+                        where: { id: divorceEvent.id },
+                        data: {
+                            date: data.divorceDate,
+                            place: data.divorcePlace || null
+                        }
+                    });
+                } else {
+                    await tx.familyEvent.create({
+                        data: {
+                            type: 'DIVORCE',
+                            familyId: family.id,
+                            date: data.divorceDate,
+                            place: data.divorcePlace
+                        }
+                    });
+                }
+
+                const distance = await computeRelationshipDistance(tx, userId, spouseId);
+                await createRelationshipClaim(tx, {
+                    fromPersonId: personId,
+                    toPersonId: spouseId,
+                    relationshipType: 'EX_SPOUSE',
+                    contributorId: userId,
+                    computedDistance: distance,
+                });
+                await createRelationshipClaim(tx, {
+                    fromPersonId: spouseId,
+                    toPersonId: personId,
+                    relationshipType: 'EX_SPOUSE',
+                    contributorId: userId,
+                    computedDistance: distance,
+                });
+            } else if (divorceEvent) {
+                await tx.familyEvent.delete({
+                    where: { id: divorceEvent.id }
+                });
             }
         });
 
         revalidatePath('/dashboard');
         return { success: true };
-    } catch (error) {
-        return { error: "Failed to record divorce" };
+    } catch {
+        return { error: "Failed to update relationship" };
     }
+}
+
+export async function divorceSpouse(personId: string, spouseId: string, divorceDate?: Date) {
+    return updateRelationship(personId, spouseId, {
+        status: 'DIVORCED',
+        divorceDate
+    });
 }

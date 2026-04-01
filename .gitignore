@@ -39,6 +39,9 @@ yarn-error.log*
 # exports
 /exports/
 
+# uploaded images (local/dev)
+/public/uploads/
+
 # vercel
 .vercel
 

@@ -107,13 +107,14 @@ export default function AddPersonModal({ relationToId, relationType, onClose, on
 
             {relationType === 'SPOUSE' && (
                 <div>
-                    <label className="block text-sm font-medium mb-1">Marriage Date</label>
+                    <label className="block text-sm font-medium mb-1">Marriage Date (Optional)</label>
                     <input 
                         type="date"
                         className="w-full border rounded px-3 py-2"
                         value={formData.marriageDate}
                         onChange={e => setFormData({...formData, marriageDate: e.target.value})}
                     />
+                    <p className="mt-1 text-xs text-gray-500">You can edit marriage and divorce details later from the spouse relationship card.</p>
                 </div>
             )}
             
