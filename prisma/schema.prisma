@@ -183,6 +183,8 @@ model Photo {
   url         String
   caption     String?
   date        DateTime?
+  data        Bytes?
+  mimeType    String?
   personId    String
   person      Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
   

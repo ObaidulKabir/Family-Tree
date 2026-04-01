@@ -18,12 +18,25 @@ interface EditPersonModalProps {
     dateOfDeath?: string | Date | null;
     placeOfDeath?: string | null;
     photos?: Array<{
+      id?: string;
       url: string;
       date?: string | Date | null;
     }>;
   };
   onClose: () => void;
   onSuccess: () => void;
+}
+
+function normalizePhotoUrl(value: string) {
+  const cleaned = value.trim().replaceAll('\\', '/')
+  if (!cleaned) return null
+  if (cleaned.startsWith('http://') || cleaned.startsWith('https://') || cleaned.startsWith('data:')) return cleaned
+  if (cleaned.startsWith('/')) return cleaned
+
+  const uploadsIndex = cleaned.indexOf('/uploads/')
+  if (uploadsIndex >= 0) return cleaned.slice(uploadsIndex)
+
+  return `/${cleaned}`
 }
 
 export default function EditPersonModal({ person, onClose, onSuccess }: EditPersonModalProps) {
@@ -58,6 +71,11 @@ export default function EditPersonModal({ person, onClose, onSuccess }: EditPers
     try {
       const uploadFormData = new FormData();
       uploadFormData.append('file', file);
+      uploadFormData.append('personId', person.id);
+      uploadFormData.append('replace', replacePhoto ? 'true' : 'false');
+      if (formData.photoDate) {
+        uploadFormData.append('photoDate', formData.photoDate);
+      }
 
       const response = await fetch('/api/upload', {
         method: 'POST',
@@ -235,7 +253,7 @@ export default function EditPersonModal({ person, onClose, onSuccess }: EditPers
                   <div className="rounded border bg-white p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Current photo</div>
                     <div className="mt-2 flex items-center gap-3">
-                      <img src={person.photos[0].url} alt="Current" className="h-16 w-16 rounded object-cover border" />
+                      <img src={(person.photos?.[0]?.id ? `/api/photo/${person.photos[0].id}` : normalizePhotoUrl(person.photos[0].url)) ?? undefined} alt="Current" className="h-16 w-16 rounded object-cover border" />
                       <div className="flex flex-col gap-2">
                         <button
                           type="button"
@@ -276,7 +294,7 @@ export default function EditPersonModal({ person, onClose, onSuccess }: EditPers
                 {formData.photoUrl ? (
                   <div className="rounded border bg-gray-50 p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">New photo preview</div>
-                    <img src={formData.photoUrl} alt="Uploaded preview" className="h-28 w-28 rounded object-cover border" />
+                    <img src={normalizePhotoUrl(formData.photoUrl) ?? undefined} alt="Uploaded preview" className="h-28 w-28 rounded object-cover border" />
                     <p className="mt-2 break-all text-xs text-gray-500">{formData.photoUrl}</p>
                   </div>
                 ) : null}

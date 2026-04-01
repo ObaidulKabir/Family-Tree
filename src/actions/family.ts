@@ -14,17 +14,17 @@ export async function getPersonDetails(personId: string) {
     where: { id: personId },
     include: {
         events: true, 
-        photos: { orderBy: { createdAt: 'desc' } },
+        photos: { orderBy: { createdAt: 'desc' }, select: { id: true, url: true, date: true } },
         childOfFamily: {
             include: {
                 parent1: {
                     include: {
-                        photos: { orderBy: { createdAt: 'desc' } }
+                        photos: { orderBy: { createdAt: 'desc' }, select: { id: true, url: true, date: true } }
                     }
                 },
                 parent2: {
                     include: {
-                        photos: { orderBy: { createdAt: 'desc' } }
+                        photos: { orderBy: { createdAt: 'desc' }, select: { id: true, url: true, date: true } }
                     }
                 }
             }
@@ -33,17 +33,17 @@ export async function getPersonDetails(personId: string) {
             include: {
                 parent1: {
                     include: {
-                        photos: { orderBy: { createdAt: 'desc' } }
+                        photos: { orderBy: { createdAt: 'desc' }, select: { id: true, url: true, date: true } }
                     }
                 },
                 parent2: {
                     include: {
-                        photos: { orderBy: { createdAt: 'desc' } }
+                        photos: { orderBy: { createdAt: 'desc' }, select: { id: true, url: true, date: true } }
                     }
                 },
                 children: {
                     include: {
-                        photos: { orderBy: { createdAt: 'desc' } }
+                        photos: { orderBy: { createdAt: 'desc' }, select: { id: true, url: true, date: true } }
                     }
                 },
                 events: true
@@ -53,17 +53,17 @@ export async function getPersonDetails(personId: string) {
             include: {
                 parent1: {
                     include: {
-                        photos: { orderBy: { createdAt: 'desc' } }
+                        photos: { orderBy: { createdAt: 'desc' }, select: { id: true, url: true, date: true } }
                     }
                 },
                 parent2: {
                     include: {
-                        photos: { orderBy: { createdAt: 'desc' } }
+                        photos: { orderBy: { createdAt: 'desc' }, select: { id: true, url: true, date: true } }
                     }
                 },
                 children: {
                     include: {
-                        photos: { orderBy: { createdAt: 'desc' } }
+                        photos: { orderBy: { createdAt: 'desc' }, select: { id: true, url: true, date: true } }
                     }
                 },
                 events: true
@@ -117,7 +117,7 @@ export async function getPersonDetails(personId: string) {
           include: {
               children: {
                   include: {
-                      photos: { orderBy: { createdAt: 'desc' } }
+                      photos: { orderBy: { createdAt: 'desc' }, select: { id: true, url: true, date: true } }
                   }
               }
           }
@@ -591,19 +591,54 @@ export async function updatePerson(
             }
 
             if (data.photoUrl) {
-                if (data.replacePhoto !== false) {
-                    await tx.photo.deleteMany({
-                        where: { personId }
+                if (data.photoUrl.startsWith('/api/photo/')) {
+                    const existing = await tx.photo.findFirst({
+                        where: { personId, url: data.photoUrl }
+                    });
+
+                    if (existing) {
+                        if (data.replacePhoto !== false) {
+                            await tx.photo.deleteMany({
+                                where: { personId, NOT: { id: existing.id } }
+                            });
+                        }
+
+                        if (data.photoDate) {
+                            await tx.photo.update({
+                                where: { id: existing.id },
+                                data: { date: data.photoDate }
+                            });
+                        }
+                    } else {
+                        if (data.replacePhoto !== false) {
+                            await tx.photo.deleteMany({
+                                where: { personId }
+                            });
+                        }
+
+                        await tx.photo.create({
+                            data: {
+                                url: data.photoUrl,
+                                personId: personId,
+                                date: data.photoDate
+                            }
+                        });
+                    }
+                } else {
+                    if (data.replacePhoto !== false) {
+                        await tx.photo.deleteMany({
+                            where: { personId }
+                        });
+                    }
+
+                    await tx.photo.create({
+                        data: {
+                            url: data.photoUrl,
+                            personId: personId,
+                            date: data.photoDate
+                        }
                     });
                 }
-
-                await tx.photo.create({
-                    data: {
-                        url: data.photoUrl,
-                        personId: personId,
-                        date: data.photoDate
-                    }
-                });
             }
         });
 

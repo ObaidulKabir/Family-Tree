@@ -13,6 +13,7 @@ import DivorceModal from './DivorceModal';
 type DateLike = string | Date | null | undefined;
 
 type PhotoLike = {
+  id?: string;
   url: string;
   date?: DateLike;
 };
@@ -85,11 +86,44 @@ function getLifeSummary(person: PersonLike) {
   return 'Living'
 }
 
+function normalizePhotoUrl(value: string) {
+  const cleaned = value.trim().replaceAll('\\', '/')
+  if (!cleaned) return null
+  if (cleaned.startsWith('http://') || cleaned.startsWith('https://') || cleaned.startsWith('data:')) return cleaned
+  if (cleaned.startsWith('/')) return cleaned
+
+  const uploadsIndex = cleaned.indexOf('/uploads/')
+  if (uploadsIndex >= 0) return cleaned.slice(uploadsIndex)
+
+  return `/${cleaned}`
+}
+
+function getPrimaryPhotoUrl(person: PersonLike) {
+  const photos = Array.isArray(person.photos) ? person.photos : []
+  const primary = photos[0]
+  if (!primary) return null
+  if (primary.id) return `/api/photo/${primary.id}`
+  return normalizePhotoUrl(primary.url)
+}
+
 function getRelationshipSummary(person: PersonLike) {
   if (person.isDivorced) {
     return `Divorced${person.divorceDate ? ` • ${formatDisplayDate(person.divorceDate)}` : ''}`;
   }
   return `Married${person.marriageDate ? ` • ${formatDisplayDate(person.marriageDate)}` : ''}`;
+}
+
+function getPersonCardDisplayName(person: PersonLike, mode: 'default' | 'nicknameOrFull') {
+  const firstName = person.firstName?.trim() ?? ''
+  const lastName = person.lastName?.trim() ?? ''
+  const fullName = `${firstName} ${lastName}`.trim()
+
+  if (mode === 'nicknameOrFull') {
+    const nickName = person.nickName?.trim() ?? ''
+    return nickName || fullName || firstName || lastName || 'Unknown'
+  }
+
+  return firstName || 'Unknown'
 }
 
 export default function FamilyTreeView({ initialPersonId }: { initialPersonId: string }) {
@@ -208,7 +242,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                 <h3 className="mb-2 text-xs font-bold text-gray-400 tracking-wider uppercase">Siblings</h3>
                 <div className="flex gap-2 flex-wrap max-w-xs justify-center">
                     {siblings.map((s: PersonLike) => (
-                        <PersonCard key={s.id} person={s} compact onClick={() => setCurrentPersonId(s.id)} onEdit={() => handleEdit(s)} />
+                        <PersonCard key={s.id} person={s} compact displayNameMode="nicknameOrFull" onClick={() => setCurrentPersonId(s.id)} onEdit={() => handleEdit(s)} />
                     ))}
                 </div>
             </div>
@@ -221,10 +255,10 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                 {/* Focal Person */}
                 <div className="flex flex-col items-center group">
                     <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-3 overflow-hidden border-4 shadow-md relative group ${isPersonDeceased(person) ? 'bg-slate-200 border-slate-100' : 'bg-indigo-100 border-white'}`}>
-                        {person.photos && person.photos.length > 0 ? (
+                        {getPrimaryPhotoUrl(person) ? (
                             <>
-                                <img src={person.photos[0].url} alt={person.firstName} className={`w-full h-full object-cover ${isPersonDeceased(person) ? 'grayscale' : ''}`} />
-                                {person.photos[0].date && (
+                                <img src={getPrimaryPhotoUrl(person) ?? undefined} alt={person.firstName} className={`w-full h-full object-cover ${isPersonDeceased(person) ? 'grayscale' : ''}`} />
+                                {person.photos?.[0]?.date && (
                                     <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] text-center py-1">
                                         {new Date(person.photos[0].date).getFullYear()}
                                     </div>
@@ -234,7 +268,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                             <UserIcon size={40} className={isPersonDeceased(person) ? 'text-slate-500' : 'text-indigo-400'} />
                         )}
                     </div>
-                    <h2 className={`text-2xl font-serif font-bold ${isPersonDeceased(person) ? 'text-slate-800' : 'text-gray-800'}`}>{person.firstName} {person.lastName}</h2>
+                    <h2 className={`text-center text-2xl font-serif font-bold ${isPersonDeceased(person) ? 'text-slate-800' : 'text-gray-800'}`}>{person.firstName} {person.lastName}</h2>
                     <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
                         {person.title ? (
                           <p className={`text-sm font-medium ${isPersonDeceased(person) ? 'text-slate-600' : 'text-indigo-600'}`}>{person.title}</p>
@@ -344,7 +378,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
             <div key={c.id} className="relative pt-6">
                 {/* Vertical line from horizontal bar to child */}
                 <div className="absolute top-0 left-1/2 -translate-x-1/2 h-6 w-0.5 bg-gray-300"></div>
-                <PersonCard person={c} onClick={() => setCurrentPersonId(c.id)} onEdit={() => handleEdit(c)} />
+                <PersonCard person={c} displayNameMode="nicknameOrFull" onClick={() => setCurrentPersonId(c.id)} onEdit={() => handleEdit(c)} />
             </div>
           ))}
           <div className="pt-6 relative">
@@ -391,8 +425,10 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
   );
 }
 
-function PersonCard({ person, onClick, onEdit, compact }: { person: PersonLike, onClick: () => void, onEdit?: () => void, compact?: boolean }) {
+function PersonCard({ person, onClick, onEdit, compact, displayNameMode = 'default' }: { person: PersonLike, onClick: () => void, onEdit?: () => void, compact?: boolean, displayNameMode?: 'default' | 'nicknameOrFull' }) {
     const deceased = isPersonDeceased(person)
+    const primaryName = getPersonCardDisplayName(person, displayNameMode)
+    const showSeparateLastName = !compact && displayNameMode === 'default'
 
     return (
         <div 
@@ -420,8 +456,8 @@ function PersonCard({ person, onClick, onEdit, compact }: { person: PersonLike, 
                 mb-3 overflow-hidden relative border-2 border-white shadow-inner
                 ${deceased ? 'bg-slate-200' : 'bg-gray-100'}
             `}>
-                {person.photos && person.photos.length > 0 ? (
-                    <img src={person.photos[0].url} alt={person.firstName} className={`w-full h-full object-cover ${deceased ? 'grayscale' : ''}`} />
+                {getPrimaryPhotoUrl(person) ? (
+                    <img src={getPrimaryPhotoUrl(person) ?? undefined} alt={person.firstName} className={`w-full h-full object-cover ${deceased ? 'grayscale' : ''}`} />
                 ) : (
                     <UserIcon size={compact ? 20 : 28} className={deceased ? 'text-slate-500' : 'text-gray-400'} />
                 )}
@@ -432,10 +468,10 @@ function PersonCard({ person, onClick, onEdit, compact }: { person: PersonLike, 
                 )}
             </div>
             
-            <div className={`font-serif font-bold text-center truncate w-full ${compact ? 'text-xs' : 'text-sm'} ${deceased ? 'text-slate-800' : 'text-gray-800'}`}>
-                {person.firstName}
+            <div className={`font-serif font-bold text-center w-full ${compact ? 'text-xs' : 'text-sm'} ${deceased ? 'text-slate-800' : 'text-gray-800'}`}>
+                <span className="block truncate">{primaryName}</span>
             </div>
-            {!compact && <div className="text-xs text-gray-500 truncate w-full text-center mt-0.5">{person.lastName}</div>}
+            {showSeparateLastName ? <div className="text-xs text-gray-500 truncate w-full text-center mt-0.5">{person.lastName}</div> : null}
             {deceased ? (
                 <div className="mt-2 rounded-full bg-slate-200 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-700">
                     In memory
