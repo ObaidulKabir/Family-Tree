@@ -46,32 +46,45 @@ export async function POST(request: Request) {
   const extension = getImageExtension(file.name, file.type)
   const displayFileName = `${personId}${extension}`
 
-  const photo = await prisma.$transaction(async (tx) => {
-    if (replace) {
-      await tx.photo.deleteMany({
-        where: { personId },
+  let photo: { id: string; url: string }
+  try {
+    photo = await prisma.$transaction(async (tx) => {
+      if (replace) {
+        await tx.photo.deleteMany({
+          where: { personId },
+        })
+      }
+
+      const created = await tx.photo.create({
+        data: {
+          url: displayFileName,
+          personId,
+          date: photoDate,
+          data: Buffer.from(bytes),
+          mimeType: file.type,
+        },
+        select: { id: true },
       })
+
+      const url = `/api/photo/${created.id}`
+      await tx.photo.update({
+        where: { id: created.id },
+        data: { url },
+      })
+
+      return { id: created.id, url }
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    if (message.includes('column') && (message.includes('data') || message.includes('mimeType'))) {
+      return Response.json(
+        { error: 'Database schema is not updated. Run prisma migrate deploy on production.' },
+        { status: 500 }
+      )
     }
 
-    const created = await tx.photo.create({
-      data: {
-        url: displayFileName,
-        personId,
-        date: photoDate,
-        data: Buffer.from(bytes),
-        mimeType: file.type,
-      },
-      select: { id: true },
-    })
-
-    const url = `/api/photo/${created.id}`
-    await tx.photo.update({
-      where: { id: created.id },
-      data: { url },
-    })
-
-    return { id: created.id, url }
-  })
+    return Response.json({ error: 'Failed to upload photo.' }, { status: 500 })
+  }
 
   return Response.json({ success: true, ...photo })
 }

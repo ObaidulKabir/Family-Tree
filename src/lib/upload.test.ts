@@ -28,3 +28,13 @@ test('getImageExtension prefers mime-based extension', () => {
   assert.equal(extension, '.webp')
 })
 
+test('validateImageUpload rejects images larger than 4MB', () => {
+  const result = validateImageUpload({
+    mimeType: 'image/jpeg',
+    size: 4 * 1024 * 1024 + 1,
+  })
+
+  assert.equal(result.valid, false)
+  assert.equal(result.error, 'Image file must be 4MB or smaller.')
+})
+

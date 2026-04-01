@@ -1,6 +1,4 @@
-import path from 'node:path'
-
-const MAX_UPLOAD_SIZE = 5 * 1024 * 1024
+const MAX_UPLOAD_SIZE = 4 * 1024 * 1024
 
 const MIME_EXTENSION_MAP: Record<string, string> = {
   'image/jpeg': '.jpg',
@@ -23,7 +21,7 @@ export function validateImageUpload(input: { mimeType: string; size: number }) {
   }
 
   if (input.size > MAX_UPLOAD_SIZE) {
-    return { valid: false, error: 'Image file must be 5MB or smaller.' }
+    return { valid: false, error: 'Image file must be 4MB or smaller.' }
   }
 
   return { valid: true as const }
@@ -33,7 +31,9 @@ export function getImageExtension(fileName: string, mimeType: string) {
   const knownExtension = MIME_EXTENSION_MAP[mimeType]
   if (knownExtension) return knownExtension
 
-  const fileExtension = path.extname(fileName).toLowerCase()
-  return fileExtension || '.jpg'
+  const trimmed = fileName.trim()
+  const lastDot = trimmed.lastIndexOf('.')
+  if (lastDot <= 0 || lastDot === trimmed.length - 1) return '.jpg'
+  return trimmed.slice(lastDot).toLowerCase()
 }
 

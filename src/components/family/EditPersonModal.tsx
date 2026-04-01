@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { updatePerson } from '@/actions/family';
 import { Loader2, Upload, X } from 'lucide-react';
+import { validateImageUpload } from '@/lib/upload';
 
 interface EditPersonModalProps {
   person: {
@@ -69,6 +70,12 @@ export default function EditPersonModal({ person, onClose, onSuccess }: EditPers
     setError('');
 
     try {
+      const validation = validateImageUpload({ mimeType: file.type, size: file.size })
+      if (!validation.valid) {
+        setError(validation.error)
+        return
+      }
+
       const uploadFormData = new FormData();
       uploadFormData.append('file', file);
       uploadFormData.append('personId', person.id);
@@ -82,10 +89,12 @@ export default function EditPersonModal({ person, onClose, onSuccess }: EditPers
         body: uploadFormData,
       });
 
-      const result = await response.json();
+      const result = await response
+        .json()
+        .catch(async () => ({ error: await response.text().catch(() => 'Upload failed') }))
 
       if (!response.ok) {
-        setError(result.error ?? 'Failed to upload photo');
+        setError(result.error ?? `Failed to upload photo (HTTP ${response.status})`);
         return;
       }
 
