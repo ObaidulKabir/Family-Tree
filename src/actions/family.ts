@@ -3,6 +3,16 @@
 import { prisma } from '@/lib/prisma'
 import { auth } from '@/auth'
 import { computeRelationshipDistance, createPersonClaims, createRelationshipClaim, upsertUserPersonLink } from '@/lib/graph'
+import {
+    buildChildAssociationAuditDescription,
+    buildExistingChildLinkAuditDescription,
+    buildExistingParentLinkAuditDescription,
+    buildExistingSpouseLinkAuditDescription,
+    validateChildSpouseAssociation,
+    validateExistingChildLink,
+    validateExistingParentLink,
+    validateExistingSpouseLink
+} from '@/lib/familyAssociation'
 import { buildPersonReviewState, groupClaimsByPerson, resolvePersonFromClaims, summarizeReviewQueue } from '@/lib/resolution'
 import { revalidatePath } from 'next/cache'
 
@@ -464,6 +474,53 @@ export async function addPerson(
     }
 }
 
+export async function searchPeopleForRelationship(query?: string, excludePersonId?: string) {
+    const session = await auth()
+    if (!session?.user?.id) return { people: [], error: 'Unauthorized' as const }
+
+    const trimmedQuery = query?.trim()
+
+    const links = await prisma.userPersonLink.findMany({
+        where: {
+            userId: session.user.id,
+            status: 'ACTIVE',
+            personId: excludePersonId ? { not: excludePersonId } : undefined,
+            person: trimmedQuery ? {
+                OR: [
+                    { firstName: { contains: trimmedQuery, mode: 'insensitive' } },
+                    { lastName: { contains: trimmedQuery, mode: 'insensitive' } },
+                    { nickName: { contains: trimmedQuery, mode: 'insensitive' } }
+                ]
+            } : undefined
+        },
+        select: {
+            computedDistance: true,
+            person: {
+                select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    nickName: true,
+                    dateOfBirth: true,
+                }
+            }
+        },
+        orderBy: [
+            { computedDistance: 'asc' },
+            { createdAt: 'desc' }
+        ],
+        take: 25
+    })
+
+    return {
+        people: links.map((link) => ({
+            ...link.person,
+            computedDistance: link.computedDistance
+        })),
+        error: null
+    }
+}
+
 export async function updatePerson(
     personId: string,
     data: { 
@@ -766,4 +823,607 @@ export async function divorceSpouse(personId: string, spouseId: string, divorceD
         status: 'DIVORCED',
         divorceDate
     });
+}
+
+export async function linkExistingPersonAsSpouse(
+    personId: string,
+    spouseId: string,
+    marriageDate?: Date
+) {
+    const session = await auth();
+    if (!session?.user?.id) return { error: "Unauthorized" };
+    const userId = session.user.id;
+
+    try {
+        const result = await prisma.$transaction(async (tx) => {
+            const [person, spouse, existingSpouseFamily, spouseIsDirectParent, spouseIsDirectChild] = await Promise.all([
+                tx.person.findUnique({
+                    where: { id: personId },
+                    select: { id: true }
+                }),
+                tx.person.findUnique({
+                    where: { id: spouseId },
+                    select: { id: true }
+                }),
+                tx.family.findFirst({
+                    where: {
+                        OR: [
+                            { parent1Id: personId, parent2Id: spouseId },
+                            { parent1Id: spouseId, parent2Id: personId }
+                        ]
+                    },
+                    select: { id: true }
+                }),
+                tx.family.findFirst({
+                    where: {
+                        children: { some: { id: personId } },
+                        OR: [
+                            { parent1Id: spouseId },
+                            { parent2Id: spouseId }
+                        ]
+                    },
+                    select: { id: true }
+                }),
+                tx.family.findFirst({
+                    where: {
+                        children: { some: { id: spouseId } },
+                        OR: [
+                            { parent1Id: personId },
+                            { parent2Id: personId }
+                        ]
+                    },
+                    select: { id: true }
+                })
+            ])
+
+            if (!person || !spouse) {
+                throw new Error("Person not found");
+            }
+
+            const validation = validateExistingSpouseLink({
+                personId,
+                spouseId,
+                alreadySpouses: Boolean(existingSpouseFamily),
+                spouseIsDirectParent: Boolean(spouseIsDirectParent),
+                spouseIsDirectChild: Boolean(spouseIsDirectChild),
+            })
+
+            if (!validation.valid) {
+                throw new Error(validation.error)
+            }
+
+            const family = await tx.family.create({
+                data: {
+                    parent1Id: personId,
+                    parent2Id: spouseId,
+                    events: {
+                        create: [
+                            {
+                                type: 'RELATIONSHIP_LINK',
+                                date: new Date(),
+                                description: buildExistingSpouseLinkAuditDescription({
+                                    actorUserId: userId,
+                                    personId,
+                                    spouseId,
+                                    familyId: ''
+                                })
+                            },
+                            ...(marriageDate ? [{
+                                type: 'MARRIAGE',
+                                date: marriageDate
+                            }] : [])
+                        ]
+                    }
+                },
+                select: {
+                    id: true
+                }
+            })
+
+            await tx.familyEvent.updateMany({
+                where: {
+                    familyId: family.id,
+                    type: 'RELATIONSHIP_LINK'
+                },
+                data: {
+                    description: buildExistingSpouseLinkAuditDescription({
+                        actorUserId: userId,
+                        personId,
+                        spouseId,
+                        familyId: family.id
+                    })
+                }
+            })
+
+            const distance = await computeRelationshipDistance(tx, userId, spouseId)
+
+            await createRelationshipClaim(tx, {
+                fromPersonId: personId,
+                toPersonId: spouseId,
+                relationshipType: 'SPOUSE',
+                contributorId: userId,
+                computedDistance: distance,
+            })
+            await createRelationshipClaim(tx, {
+                fromPersonId: spouseId,
+                toPersonId: personId,
+                relationshipType: 'SPOUSE',
+                contributorId: userId,
+                computedDistance: distance,
+            })
+
+            await upsertUserPersonLink(tx, {
+                userId,
+                personId: spouseId,
+                role: 'CONTRIBUTOR',
+                status: 'ACTIVE',
+                computedDistance: distance,
+            })
+
+            return { success: true, familyId: family.id }
+        })
+
+        revalidatePath('/dashboard');
+        return result;
+    } catch (error) {
+        console.error(error);
+        if (error instanceof Error && error.message) {
+            return { error: error.message };
+        }
+        return { error: "Failed to link existing person as spouse" };
+    }
+}
+
+export async function linkExistingPersonAsParent(
+    childId: string,
+    parentId: string
+) {
+    const session = await auth();
+    if (!session?.user?.id) return { error: "Unauthorized" };
+    const userId = session.user.id;
+
+    try {
+        const result = await prisma.$transaction(async (tx) => {
+            const [child, parent, parentIsDirectChild, parentIsDirectSpouse] = await Promise.all([
+                tx.person.findUnique({
+                    where: { id: childId },
+                    select: {
+                        id: true,
+                        childOfFamilyId: true,
+                        childOfFamily: {
+                            select: {
+                                id: true,
+                                parent1Id: true,
+                                parent2Id: true,
+                            }
+                        }
+                    }
+                }),
+                tx.person.findUnique({
+                    where: { id: parentId },
+                    select: { id: true }
+                }),
+                tx.family.findFirst({
+                    where: {
+                        children: { some: { id: parentId } },
+                        OR: [
+                            { parent1Id: childId },
+                            { parent2Id: childId }
+                        ]
+                    },
+                    select: { id: true }
+                }),
+                tx.family.findFirst({
+                    where: {
+                        OR: [
+                            { parent1Id: childId, parent2Id: parentId },
+                            { parent1Id: parentId, parent2Id: childId }
+                        ]
+                    },
+                    select: { id: true }
+                })
+            ])
+
+            if (!child || !parent) {
+                throw new Error("Person not found");
+            }
+
+            const alreadyParent = Boolean(
+                child.childOfFamily &&
+                [child.childOfFamily.parent1Id, child.childOfFamily.parent2Id].includes(parentId)
+            )
+
+            const validation = validateExistingParentLink({
+                childId,
+                parentId,
+                alreadyParent,
+                childHasOpenParentSlot: !child.childOfFamily || !child.childOfFamily.parent1Id || !child.childOfFamily.parent2Id,
+                parentIsDirectChild: Boolean(parentIsDirectChild),
+                parentIsDirectSpouse: Boolean(parentIsDirectSpouse),
+            })
+
+            if (!validation.valid) {
+                throw new Error(validation.error)
+            }
+
+            let familyId: string
+
+            if (!child.childOfFamily) {
+                const family = await tx.family.create({
+                    data: {
+                        parent1Id: parentId,
+                        children: { connect: { id: childId } }
+                    },
+                    select: { id: true }
+                })
+                familyId = family.id
+            } else {
+                familyId = child.childOfFamily.id
+                await tx.family.update({
+                    where: { id: child.childOfFamily.id },
+                    data: child.childOfFamily.parent1Id
+                        ? { parent2Id: parentId }
+                        : { parent1Id: parentId }
+                })
+            }
+
+            const distance = await computeRelationshipDistance(tx, userId, parentId)
+
+            await createRelationshipClaim(tx, {
+                fromPersonId: parentId,
+                toPersonId: childId,
+                relationshipType: 'BIO_PARENT',
+                contributorId: userId,
+                computedDistance: distance,
+            })
+            await createRelationshipClaim(tx, {
+                fromPersonId: childId,
+                toPersonId: parentId,
+                relationshipType: 'CHILD',
+                contributorId: userId,
+                computedDistance: distance,
+            })
+
+            await upsertUserPersonLink(tx, {
+                userId,
+                personId: parentId,
+                role: 'CONTRIBUTOR',
+                status: 'ACTIVE',
+                computedDistance: distance,
+            })
+
+            await tx.familyEvent.create({
+                data: {
+                    type: 'RELATIONSHIP_LINK_PARENT',
+                    familyId,
+                    date: new Date(),
+                    description: buildExistingParentLinkAuditDescription({
+                        actorUserId: userId,
+                        childId,
+                        parentId,
+                        familyId,
+                    })
+                }
+            })
+
+            return { success: true, familyId }
+        })
+
+        revalidatePath('/dashboard');
+        return result;
+    } catch (error) {
+        console.error(error);
+        if (error instanceof Error && error.message) {
+            return { error: error.message };
+        }
+        return { error: "Failed to link existing person as parent" };
+    }
+}
+
+export async function linkExistingPersonAsChild(
+    parentId: string,
+    childId: string
+) {
+    const session = await auth();
+    if (!session?.user?.id) return { error: "Unauthorized" };
+    const userId = session.user.id;
+
+    try {
+        const result = await prisma.$transaction(async (tx) => {
+            const [parent, child, childIsDirectParent, childIsDirectSpouse] = await Promise.all([
+                tx.person.findUnique({
+                    where: { id: parentId },
+                    select: {
+                        id: true,
+                        familiesAsParent1: {
+                            select: { id: true }
+                        },
+                        familiesAsParent2: {
+                            select: { id: true }
+                        }
+                    }
+                }),
+                tx.person.findUnique({
+                    where: { id: childId },
+                    select: {
+                        id: true,
+                        childOfFamilyId: true,
+                        childOfFamily: {
+                            select: {
+                                id: true,
+                                parent1Id: true,
+                                parent2Id: true,
+                            }
+                        }
+                    }
+                }),
+                tx.family.findFirst({
+                    where: {
+                        children: { some: { id: parentId } },
+                        OR: [
+                            { parent1Id: childId },
+                            { parent2Id: childId }
+                        ]
+                    },
+                    select: { id: true }
+                }),
+                tx.family.findFirst({
+                    where: {
+                        OR: [
+                            { parent1Id: parentId, parent2Id: childId },
+                            { parent1Id: childId, parent2Id: parentId }
+                        ]
+                    },
+                    select: { id: true }
+                })
+            ])
+
+            if (!parent || !child) {
+                throw new Error("Person not found");
+            }
+
+            const parentFamilies = [...parent.familiesAsParent1, ...parent.familiesAsParent2]
+            const firstParentFamilyId = parentFamilies[0]?.id
+            const childParentIds = child.childOfFamily ? [child.childOfFamily.parent1Id, child.childOfFamily.parent2Id].filter(Boolean) : []
+            const alreadyChild = childParentIds.includes(parentId) || child.childOfFamilyId === firstParentFamilyId
+
+            const childHasConflictingFamily = Boolean(
+                child.childOfFamily &&
+                (
+                    (firstParentFamilyId && child.childOfFamily.id !== firstParentFamilyId) ||
+                    (!firstParentFamilyId && childParentIds.length === 2)
+                ) &&
+                !childParentIds.includes(parentId)
+            )
+
+            const validation = validateExistingChildLink({
+                parentId,
+                childId,
+                alreadyChild,
+                childHasConflictingFamily,
+                childIsDirectParent: Boolean(childIsDirectParent),
+                childIsDirectSpouse: Boolean(childIsDirectSpouse),
+            })
+
+            if (!validation.valid) {
+                throw new Error(validation.error)
+            }
+
+            let familyId: string
+
+            if (firstParentFamilyId) {
+                familyId = firstParentFamilyId
+                await tx.person.update({
+                    where: { id: childId },
+                    data: { childOfFamilyId: firstParentFamilyId }
+                })
+            } else if (child.childOfFamily) {
+                familyId = child.childOfFamily.id
+                await tx.family.update({
+                    where: { id: child.childOfFamily.id },
+                    data: child.childOfFamily.parent1Id
+                        ? { parent2Id: parentId }
+                        : { parent1Id: parentId }
+                })
+            } else {
+                const family = await tx.family.create({
+                    data: {
+                        parent1Id: parentId,
+                        children: { connect: { id: childId } }
+                    },
+                    select: { id: true }
+                })
+                familyId = family.id
+            }
+
+            const distance = await computeRelationshipDistance(tx, userId, childId)
+
+            await createRelationshipClaim(tx, {
+                fromPersonId: parentId,
+                toPersonId: childId,
+                relationshipType: 'BIO_PARENT',
+                contributorId: userId,
+                computedDistance: distance,
+            })
+            await createRelationshipClaim(tx, {
+                fromPersonId: childId,
+                toPersonId: parentId,
+                relationshipType: 'CHILD',
+                contributorId: userId,
+                computedDistance: distance,
+            })
+
+            await upsertUserPersonLink(tx, {
+                userId,
+                personId: childId,
+                role: 'CONTRIBUTOR',
+                status: 'ACTIVE',
+                computedDistance: distance,
+            })
+
+            await tx.familyEvent.create({
+                data: {
+                    type: 'RELATIONSHIP_LINK_CHILD',
+                    familyId,
+                    date: new Date(),
+                    description: buildExistingChildLinkAuditDescription({
+                        actorUserId: userId,
+                        parentId,
+                        childId,
+                        familyId,
+                    })
+                }
+            })
+
+            return { success: true, familyId }
+        })
+
+        revalidatePath('/dashboard');
+        return result;
+    } catch (error) {
+        console.error(error);
+        if (error instanceof Error && error.message) {
+            return { error: error.message };
+        }
+        return { error: "Failed to link existing person as child" };
+    }
+}
+
+export async function associateChildWithSpouse(
+    personId: string,
+    spouseId: string,
+    spouseFamilyId: string,
+    childId: string
+) {
+    const session = await auth();
+    if (!session?.user) return { error: "Unauthorized" };
+    if (!session.user.id) return { error: "Unauthorized" };
+    const userId = session.user.id;
+
+    try {
+        const result = await prisma.$transaction(async (tx) => {
+            const [spouseFamily, child] = await Promise.all([
+                tx.family.findUnique({
+                    where: { id: spouseFamilyId },
+                    select: {
+                        id: true,
+                        parent1Id: true,
+                        parent2Id: true
+                    }
+                }),
+                tx.person.findUnique({
+                    where: { id: childId },
+                    select: {
+                        id: true,
+                        childOfFamilyId: true,
+                        childOfFamily: {
+                            select: {
+                                id: true,
+                                parent1Id: true,
+                                parent2Id: true
+                            }
+                        }
+                    }
+                })
+            ])
+
+            if (!child) {
+                throw new Error("Child not found");
+            }
+
+            const validation = validateChildSpouseAssociation({
+                parentId: personId,
+                spouseId,
+                childId,
+                spouseFamily,
+                childFamily: child.childOfFamily
+            })
+
+            if (!validation.valid) {
+                throw new Error(validation.error)
+            }
+
+            const previousFamilyId = child.childOfFamilyId
+
+            await tx.person.update({
+                where: { id: childId },
+                data: {
+                    childOfFamilyId: spouseFamilyId
+                }
+            })
+
+            const childDistance = await computeRelationshipDistance(tx, userId, childId)
+
+            await createRelationshipClaim(tx, {
+                fromPersonId: spouseId,
+                toPersonId: childId,
+                relationshipType: 'BIO_PARENT',
+                contributorId: userId,
+                computedDistance: childDistance,
+            })
+            await createRelationshipClaim(tx, {
+                fromPersonId: childId,
+                toPersonId: spouseId,
+                relationshipType: 'CHILD',
+                contributorId: userId,
+                computedDistance: childDistance,
+            })
+
+            await tx.familyEvent.create({
+                data: {
+                    type: 'CHILD_ASSOCIATION',
+                    familyId: spouseFamilyId,
+                    date: new Date(),
+                    description: buildChildAssociationAuditDescription({
+                        actorUserId: userId,
+                        parentId: personId,
+                        spouseId,
+                        childId,
+                        previousFamilyId,
+                        nextFamilyId: spouseFamilyId,
+                    })
+                }
+            })
+
+            if (previousFamilyId && previousFamilyId !== spouseFamilyId) {
+                const previousFamily = await tx.family.findUnique({
+                    where: { id: previousFamilyId },
+                    select: {
+                        id: true,
+                        parent1Id: true,
+                        parent2Id: true,
+                        children: {
+                            select: { id: true }
+                        },
+                        events: {
+                            select: { id: true }
+                        }
+                    }
+                })
+
+                if (
+                    previousFamily &&
+                    [previousFamily.parent1Id, previousFamily.parent2Id].includes(personId) &&
+                    !previousFamily.parent2Id &&
+                    previousFamily.children.length === 0 &&
+                    previousFamily.events.length === 0
+                ) {
+                    await tx.family.delete({
+                        where: { id: previousFamily.id }
+                    })
+                }
+            }
+
+            return { success: true }
+        })
+
+        revalidatePath('/dashboard');
+        return result;
+    } catch (error) {
+        console.error(error);
+        if (error instanceof Error && error.message) {
+            return { error: error.message };
+        }
+        return { error: "Failed to associate child with spouse" };
+    }
 }

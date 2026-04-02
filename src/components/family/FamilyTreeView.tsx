@@ -9,6 +9,8 @@ import AddPersonModal from './AddPersonModal';
 import InviteModal from './InviteModal';
 import EditPersonModal from './EditPersonModal';
 import DivorceModal from './DivorceModal';
+import AssociateChildModal from './AssociateChildModal';
+import { getAssociableChildrenForSpouse } from '@/lib/familyAssociation';
 
 type DateLike = string | Date | null | undefined;
 
@@ -28,6 +30,7 @@ type PersonLike = {
   placeOfBirth?: string | null;
   dateOfDeath?: DateLike;
   placeOfDeath?: string | null;
+  childOfFamilyId?: string | null;
   photos?: PhotoLike[];
   isDivorced?: boolean;
   familyId?: string;
@@ -126,6 +129,21 @@ function getPersonCardDisplayName(person: PersonLike, mode: 'default' | 'nicknam
   return firstName || 'Unknown'
 }
 
+function buildRoleAliases(groups: Record<string, PersonLike[]>) {
+  const roleMap = new Map<string, Set<string>>()
+
+  for (const [role, people] of Object.entries(groups)) {
+    for (const person of people) {
+      if (!roleMap.has(person.id)) {
+        roleMap.set(person.id, new Set())
+      }
+      roleMap.get(person.id)?.add(role)
+    }
+  }
+
+  return roleMap
+}
+
 export default function FamilyTreeView({ initialPersonId }: { initialPersonId: string }) {
   const [currentPersonId, setCurrentPersonId] = useState(initialPersonId);
   const [data, setData] = useState<FamilyTreeData | null>(null);
@@ -134,7 +152,9 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDivorceModal, setShowDivorceModal] = useState(false);
+  const [showAssociateChildModal, setShowAssociateChildModal] = useState(false);
   const [selectedSpouse, setSelectedSpouse] = useState<PersonLike | null>(null);
+  const [associationSpouse, setAssociationSpouse] = useState<PersonLike | null>(null);
   const [editingPerson, setEditingPerson] = useState<PersonLike | null>(null);
   const [addRelationType, setAddRelationType] = useState<'PARENT' | 'CHILD' | 'SPOUSE' | null>(null);
 
@@ -184,11 +204,28 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
       loadPerson(currentPersonId);
   };
 
+  const handleAssociateChild = (spouse: PersonLike) => {
+      setAssociationSpouse(spouse);
+      setShowAssociateChildModal(true);
+  };
+
+  const handleAssociateChildSuccess = () => {
+      setShowAssociateChildModal(false);
+      setAssociationSpouse(null);
+      loadPerson(currentPersonId);
+  };
+
   if (loading) return <div className="flex h-96 items-center justify-center text-gray-400">Loading family data...</div>;
   if (!data) return <div className="flex h-96 items-center justify-center text-red-400">Person not found</div>;
 
   const { person, parents, spouses, children, siblings } = data;
   const reviewSummary = data.reviewSummary;
+  const roleAliases = buildRoleAliases({
+      parent: parents,
+      spouse: spouses,
+      child: children,
+      sibling: siblings
+  })
 
   return (
     <div className="flex flex-col items-center gap-12 min-h-[600px] py-10">
@@ -242,7 +279,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                 <h3 className="mb-2 text-xs font-bold text-gray-400 tracking-wider uppercase">Siblings</h3>
                 <div className="flex gap-2 flex-wrap max-w-xs justify-center">
                     {siblings.map((s: PersonLike) => (
-                        <PersonCard key={s.id} person={s} compact displayNameMode="nicknameOrFull" onClick={() => setCurrentPersonId(s.id)} onEdit={() => handleEdit(s)} />
+                        <PersonCard key={s.id} person={s} compact displayNameMode="nicknameOrFull" aliasRoles={[...(roleAliases.get(s.id) ?? [])].filter((role) => role !== 'sibling')} onClick={() => setCurrentPersonId(s.id)} onEdit={() => handleEdit(s)} />
                     ))}
                 </div>
             </div>
@@ -341,7 +378,16 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                                             </span>
                                         ) : null}
                                     </button>
-                                    <PersonCard person={s} onClick={() => setCurrentPersonId(s.id)} onEdit={() => handleEdit(s)} />
+                                    <PersonCard person={s} aliasRoles={[...(roleAliases.get(s.id) ?? [])].filter((role) => role !== 'spouse')} onClick={() => setCurrentPersonId(s.id)} onEdit={() => handleEdit(s)} />
+                                    {getAssociableChildrenForSpouse(children, s.familyId).length > 0 ? (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); handleAssociateChild(s); }}
+                                            className="mt-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-indigo-700 hover:bg-indigo-100"
+                                            title="Associate an existing child with this spouse"
+                                        >
+                                            Associate child
+                                        </button>
+                                    ) : null}
                                     <button
                                         onClick={(e) => { e.stopPropagation(); handleDivorce(s); }}
                                         className="absolute -top-2 -right-2 bg-white border border-red-200 text-red-500 rounded-full p-1 opacity-0 group-hover:opacity-100 hover:bg-red-50 shadow-sm transition-all"
@@ -378,7 +424,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
             <div key={c.id} className="relative pt-6">
                 {/* Vertical line from horizontal bar to child */}
                 <div className="absolute top-0 left-1/2 -translate-x-1/2 h-6 w-0.5 bg-gray-300"></div>
-                <PersonCard person={c} displayNameMode="nicknameOrFull" onClick={() => setCurrentPersonId(c.id)} onEdit={() => handleEdit(c)} />
+                <PersonCard person={c} displayNameMode="nicknameOrFull" aliasRoles={[...(roleAliases.get(c.id) ?? [])].filter((role) => role !== 'child')} onClick={() => setCurrentPersonId(c.id)} onEdit={() => handleEdit(c)} />
             </div>
           ))}
           <div className="pt-6 relative">
@@ -421,11 +467,21 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
             onSuccess={handleDivorceSuccess}
           />
       )}
+
+      {showAssociateChildModal && associationSpouse ? (
+          <AssociateChildModal
+            personId={currentPersonId}
+            spouse={associationSpouse}
+            availableChildren={children}
+            onClose={() => { setShowAssociateChildModal(false); setAssociationSpouse(null); }}
+            onSuccess={handleAssociateChildSuccess}
+          />
+      ) : null}
     </div>
   );
 }
 
-function PersonCard({ person, onClick, onEdit, compact, displayNameMode = 'default' }: { person: PersonLike, onClick: () => void, onEdit?: () => void, compact?: boolean, displayNameMode?: 'default' | 'nicknameOrFull' }) {
+function PersonCard({ person, onClick, onEdit, compact, displayNameMode = 'default', aliasRoles = [] }: { person: PersonLike, onClick: () => void, onEdit?: () => void, compact?: boolean, displayNameMode?: 'default' | 'nicknameOrFull', aliasRoles?: string[] }) {
     const deceased = isPersonDeceased(person)
     const primaryName = getPersonCardDisplayName(person, displayNameMode)
     const showSeparateLastName = !compact && displayNameMode === 'default'
@@ -472,6 +528,11 @@ function PersonCard({ person, onClick, onEdit, compact, displayNameMode = 'defau
                 <span className="block truncate">{primaryName}</span>
             </div>
             {showSeparateLastName ? <div className="text-xs text-gray-500 truncate w-full text-center mt-0.5">{person.lastName}</div> : null}
+            {aliasRoles.length > 0 ? (
+                <div className="mt-1 rounded-full bg-amber-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                    Also: {aliasRoles.join(', ')}
+                </div>
+            ) : null}
             {deceased ? (
                 <div className="mt-2 rounded-full bg-slate-200 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-700">
                     In memory
