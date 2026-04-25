@@ -4,6 +4,8 @@ import { redirect } from 'next/navigation';
 import FamilyTreeView from '@/components/family/FamilyTreeView';
 import { prisma } from '@/lib/prisma';
 import { createPersonClaims, splitDisplayName, upsertUserPersonLink } from '@/lib/graph';
+import { canManageGraph } from '@/lib/graphManagement';
+import { getCurrentGraphContext } from '@/actions/graphManagement';
 import { SignOut } from '@/components/auth/SignOut';
 
 export default async function DashboardPage() {
@@ -79,19 +81,36 @@ export default async function DashboardPage() {
     })
   }
 
+  const graphContext = await getCurrentGraphContext(user.id, displayName, rootPersonId)
+  const initialPersonId = graphContext.rootPersonId ?? rootPersonId
+  const canManageCurrentGraph = canManageGraph(graphContext.role)
+
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-6 py-4 flex justify-between items-center">
             <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-serif font-bold text-lg">F</div>
-                <h1 className="text-xl font-serif font-bold text-gray-800">FamilyHeritage</h1>
+                <h1 className="text-xl font-serif font-bold text-gray-800">FamilyExplorer</h1>
             </div>
             
             <div className="flex items-center gap-6">
                <Link href="/dashboard/review" className="text-sm text-indigo-600 font-medium hover:text-indigo-700">
                  Review updates
                </Link>
+               <Link href="/dashboard/settings" className="text-sm text-indigo-600 font-medium hover:text-indigo-700">
+                 Settings
+               </Link>
+               {canManageCurrentGraph ? (
+                 <Link href="/dashboard/graph-management" className="text-sm text-indigo-600 font-medium hover:text-indigo-700">
+                   Graph management
+                 </Link>
+               ) : null}
+               {graphContext.graphName ? (
+                 <span className="hidden rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-indigo-700 md:inline-flex">
+                   {graphContext.graphName}
+                 </span>
+               ) : null}
                <span className="text-sm text-gray-500 font-medium hidden md:block">Welcome, {displayName}</span>
                <SignOut />
             </div>
@@ -99,7 +118,7 @@ export default async function DashboardPage() {
       </header>
       
       <main className="container mx-auto px-4 py-8">
-         <FamilyTreeView initialPersonId={rootPersonId} />
+         <FamilyTreeView initialPersonId={initialPersonId} />
       </main>
     </div>
   );

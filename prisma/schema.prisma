@@ -17,6 +17,8 @@ model User {
   
   rootPersonId  String?   @unique
   rootPerson    Person?   @relation("UserRootPerson", fields: [rootPersonId], references: [id])
+  currentGraphId String?
+  currentGraph   FamilyGraph? @relation("UserCurrentGraph", fields: [currentGraphId], references: [id])
   
   createdPeople Person[]  @relation("CreatedBy")
   contributedLayers PersonLayer[]
@@ -26,6 +28,13 @@ model User {
   relationshipClaims RelationshipClaim[] @relation("RelationshipClaimContributor")
   createdPersonLinks PersonLink[] @relation("PersonLinkCreatedBy")
   resolutionCases ResolutionCase[] @relation("ResolutionCaseCreatedBy")
+  adminGraphs   FamilyGraph[] @relation("GraphAdmin")
+  graphMemberships GraphMembership[] @relation("GraphMembershipUser")
+  sentGraphInvitations GraphInvitation[] @relation("GraphInvitationInviter")
+  receivedGraphInvitations GraphInvitation[] @relation("GraphInvitationInvitee")
+  graphAuditLogs GraphAuditLog[] @relation("GraphAuditActor")
+  invitedGraphMemberships GraphMembership[] @relation("GraphMembershipInvitedBy")
+  passwordResetTokens PasswordResetToken[]
   
   accounts      Account[]
   sessions      Session[]
@@ -69,8 +78,24 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
+model PasswordResetToken {
+  id         String   @id @default(cuid())
+  userId     String
+  email      String
+  token      String   @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([email, createdAt])
+}
+
 model Person {
   id          String    @id @default(cuid())
+  graphId      String?
   firstName   String
   lastName    String?
   middleName  String?
@@ -85,9 +110,11 @@ model Person {
   
   createdById String
   createdBy   User   @relation("CreatedBy", fields: [createdById], references: [id])
+  graph       FamilyGraph? @relation("GraphPeople", fields: [graphId], references: [id])
   
   linkedUserId String? @unique
   linkedUser   User?   @relation("UserRootPerson")
+  rootOfGraph  FamilyGraph? @relation("GraphRootPerson")
   
   // Relationships via Family
   // The family this person is a child of
@@ -144,6 +171,8 @@ model PersonLayer {
 
 model Family {
   id          String   @id @default(cuid())
+  graphId     String?
+  graph       FamilyGraph? @relation("GraphFamilies", fields: [graphId], references: [id])
 
   parent1Id   String?
   parent1     Person?  @relation("FamilyParent1", fields: [parent1Id], references: [id])
@@ -204,6 +233,89 @@ model Invitation {
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model FamilyGraph {
+  id            String   @id @default(cuid())
+  name          String
+  adminUserId   String
+  rootPersonId  String?  @unique
+  status        String   @default("ACTIVE")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  adminUser     User     @relation("GraphAdmin", fields: [adminUserId], references: [id], onDelete: Cascade)
+  rootPerson    Person?  @relation("GraphRootPerson", fields: [rootPersonId], references: [id])
+  currentUsers  User[]   @relation("UserCurrentGraph")
+  people        Person[] @relation("GraphPeople")
+  families      Family[] @relation("GraphFamilies")
+  memberships   GraphMembership[]
+  invitations   GraphInvitation[]
+  auditLogs     GraphAuditLog[]
+
+  @@index([adminUserId, status])
+}
+
+model GraphMembership {
+  id             String   @id @default(cuid())
+  graphId        String
+  userId         String
+  role           String   @default("EDITOR")
+  status         String   @default("ACTIVE")
+  invitedByUserId String?
+  invitationId   String?
+  lastSeenAt     DateTime?
+  lastActivityAt DateTime?
+  currentPersonId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  graph          FamilyGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
+  user           User        @relation("GraphMembershipUser", fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy      User?       @relation("GraphMembershipInvitedBy", fields: [invitedByUserId], references: [id])
+
+  @@unique([graphId, userId])
+  @@index([graphId, status, role])
+}
+
+model GraphInvitation {
+  id             String   @id @default(cuid())
+  graphId        String
+  email          String
+  role           String   @default("EDITOR")
+  token          String   @unique
+  status         String   @default("PENDING")
+  invitedByUserId String
+  invitedUserId  String?
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  graph          FamilyGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
+  invitedBy      User        @relation("GraphInvitationInviter", fields: [invitedByUserId], references: [id], onDelete: Cascade)
+  invitedUser    User?       @relation("GraphInvitationInvitee", fields: [invitedUserId], references: [id])
+
+  @@index([graphId, status, expiresAt])
+  @@index([email, status])
+}
+
+model GraphAuditLog {
+  id             String   @id @default(cuid())
+  graphId        String
+  actorUserId    String?
+  action         String
+  entityType     String
+  entityId       String?
+  detailsJson    Json?
+  createdAt      DateTime @default(now())
+
+  graph          FamilyGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
+  actorUser      User?       @relation("GraphAuditActor", fields: [actorUserId], references: [id])
+
+  @@index([graphId, createdAt])
+  @@index([action, entityType])
 }
 
 model UserPersonLink {

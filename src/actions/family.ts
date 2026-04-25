@@ -3,6 +3,7 @@
 import { prisma } from '@/lib/prisma'
 import { auth } from '@/auth'
 import { computeRelationshipDistance, createPersonClaims, createRelationshipClaim, upsertUserPersonLink } from '@/lib/graph'
+import { canEditGraph, canManageGraph, validateOptimisticConcurrency } from '@/lib/graphManagement'
 import {
     buildChildAssociationAuditDescription,
     buildExistingChildLinkAuditDescription,
@@ -14,11 +15,15 @@ import {
     validateExistingSpouseLink
 } from '@/lib/familyAssociation'
 import { buildPersonReviewState, groupClaimsByPerson, resolvePersonFromClaims, summarizeReviewQueue } from '@/lib/resolution'
+import { createGraphAuditEntry, getCurrentGraphContext, requireGraphPermissionForPerson } from '@/actions/graphManagement'
 import { revalidatePath } from 'next/cache'
 
 export async function getPersonDetails(personId: string) {
   const session = await auth()
   if (!session?.user) return { error: "Unauthorized" }
+  if (!session.user.id) return { error: "Unauthorized" }
+
+  const graphContext = await requireGraphPermissionForPerson(prisma, session.user.id, personId, 'view')
 
   const person = await prisma.person.findUnique({
     where: { id: personId },
@@ -194,7 +199,13 @@ export async function getPersonDetails(personId: string) {
       spouses: resolvedSpouses,
       children: resolvedChildren,
       siblings: resolvedSiblings,
-      reviewSummary
+      reviewSummary,
+      graphPermission: {
+        graphId: graphContext.graphId,
+        role: graphContext.role,
+        canEdit: canEditGraph(graphContext.role),
+        canManage: canManageGraph(graphContext.role),
+      }
   };
 }
 
@@ -207,11 +218,13 @@ export async function addPerson(
     if (!session?.user) return { error: "Unauthorized" };
     if (!session.user.id) return { error: "Unauthorized" };
     const userId = session.user.id;
+    const graphContext = await requireGraphPermissionForPerson(prisma, userId, relationToId, 'edit')
 
     try {
         const newPerson = await prisma.$transaction(async (tx) => {
             const createdPerson = await tx.person.create({
                 data: {
+                    graphId: graphContext.graphId,
                     firstName: data.firstName,
                     lastName: data.lastName,
                     gender: data.gender,
@@ -249,6 +262,7 @@ export async function addPerson(
                 } else {
                     await tx.family.create({
                         data: {
+                            graphId: graphContext.graphId,
                             parent1Id: createdPerson.id,
                             children: { connect: { id: child.id } }
                         }
@@ -331,6 +345,7 @@ export async function addPerson(
                 } else {
                     await tx.family.create({
                         data: {
+                            graphId: graphContext.graphId,
                             parent1Id: parent.id,
                             children: { connect: { id: createdPerson.id } }
                         }
@@ -395,6 +410,7 @@ export async function addPerson(
 
             await tx.family.create({
                 data: {
+                    graphId: graphContext.graphId,
                     parent1Id: relationToId,
                     parent2Id: createdPerson.id,
                     events: data.marriageDate ? {
@@ -459,6 +475,18 @@ export async function addPerson(
                 computedDistance: distance,
             });
 
+            await createGraphAuditEntry(tx, {
+                graphId: graphContext.graphId,
+                actorUserId: userId,
+                action: 'PERSON_CREATED',
+                entityType: 'PERSON',
+                entityId: createdPerson.id,
+                details: {
+                    relationType,
+                    relationToId,
+                },
+            })
+
             return createdPerson;
         });
 
@@ -480,45 +508,112 @@ export async function searchPeopleForRelationship(query?: string, excludePersonI
 
     const trimmedQuery = query?.trim()
 
-    const links = await prisma.userPersonLink.findMany({
+    const user = await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { id: true, name: true, rootPersonId: true }
+    })
+
+    if (!user?.rootPersonId) {
+        return { people: [], error: null }
+    }
+
+    const graphContext = await getCurrentGraphContext(
+        user.id,
+        user.name ?? session.user.name ?? 'User',
+        user.rootPersonId
+    )
+
+    if (!graphContext.graphId) {
+        return { people: [], error: null }
+    }
+
+    const people = await prisma.person.findMany({
         where: {
-            userId: session.user.id,
-            status: 'ACTIVE',
-            personId: excludePersonId ? { not: excludePersonId } : undefined,
-            person: trimmedQuery ? {
+            graphId: graphContext.graphId,
+            id: excludePersonId ? { not: excludePersonId } : undefined,
+            ...(trimmedQuery ? {
                 OR: [
                     { firstName: { contains: trimmedQuery, mode: 'insensitive' } },
                     { lastName: { contains: trimmedQuery, mode: 'insensitive' } },
                     { nickName: { contains: trimmedQuery, mode: 'insensitive' } }
                 ]
-            } : undefined
+            } : {})
         },
         select: {
-            computedDistance: true,
-            person: {
-                select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    nickName: true,
-                    dateOfBirth: true,
-                }
-            }
+            id: true,
+            firstName: true,
+            lastName: true,
+            nickName: true,
+            dateOfBirth: true,
         },
         orderBy: [
-            { computedDistance: 'asc' },
-            { createdAt: 'desc' }
+            { firstName: 'asc' },
+            { lastName: 'asc' }
         ],
         take: 25
     })
 
     return {
-        people: links.map((link) => ({
-            ...link.person,
-            computedDistance: link.computedDistance
+        people: people.map((person) => ({
+            ...person,
+            computedDistance: null
         })),
         error: null
     }
+}
+
+export async function searchPeopleInCurrentGraph(query?: string) {
+    const session = await auth()
+    if (!session?.user?.id) return { people: [], error: 'Unauthorized' as const }
+
+    const trimmedQuery = query?.trim()
+    if (!trimmedQuery) {
+        return { people: [], error: null }
+    }
+
+    const user = await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { id: true, name: true, rootPersonId: true }
+    })
+
+    if (!user?.rootPersonId) {
+        return { people: [], error: null }
+    }
+
+    const graphContext = await getCurrentGraphContext(
+        user.id,
+        user.name ?? session.user.name ?? 'User',
+        user.rootPersonId
+    )
+
+    if (!graphContext.graphId) {
+        return { people: [], error: null }
+    }
+
+    const people = await prisma.person.findMany({
+        where: {
+            graphId: graphContext.graphId,
+            OR: [
+                { firstName: { contains: trimmedQuery, mode: 'insensitive' } },
+                { lastName: { contains: trimmedQuery, mode: 'insensitive' } },
+                { nickName: { contains: trimmedQuery, mode: 'insensitive' } }
+            ]
+        },
+        select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            nickName: true,
+            dateOfBirth: true,
+        },
+        orderBy: [
+            { firstName: 'asc' },
+            { lastName: 'asc' }
+        ],
+        take: 15
+    })
+
+    return { people, error: null }
 }
 
 export async function updatePerson(
@@ -538,6 +633,7 @@ export async function updatePerson(
         photoDate?: Date;
         replacePhoto?: boolean;
         removePhoto?: boolean;
+        lastKnownUpdatedAt?: Date;
     }
 ) {
     const session = await auth();
@@ -545,6 +641,7 @@ export async function updatePerson(
     if (!session.user.id) return { error: "Unauthorized" };
     const userId = session.user.id;
     
+    const graphContext = await requireGraphPermissionForPerson(prisma, userId, personId, 'edit')
     const person = await prisma.person.findUnique({ where: { id: personId } });
     if (!person) return { error: "Person not found" };
     
@@ -552,6 +649,15 @@ export async function updatePerson(
         const distance = await computeRelationshipDistance(prisma, userId, personId);
 
         await prisma.$transaction(async (tx) => {
+            const concurrency = validateOptimisticConcurrency({
+                currentUpdatedAt: person.updatedAt,
+                expectedUpdatedAt: data.lastKnownUpdatedAt,
+            })
+
+            if (!concurrency.valid) {
+                throw new Error(concurrency.error)
+            }
+
             await tx.personLayer.create({
                 data: {
                     personId: personId,
@@ -697,6 +803,17 @@ export async function updatePerson(
                     });
                 }
             }
+
+            await createGraphAuditEntry(tx, {
+                graphId: graphContext.graphId,
+                actorUserId: userId,
+                action: 'PERSON_UPDATED',
+                entityType: 'PERSON',
+                entityId: personId,
+                details: {
+                    fields: Object.keys(data).filter((field) => field !== 'lastKnownUpdatedAt'),
+                },
+            })
         });
 
         revalidatePath('/dashboard');
@@ -722,6 +839,7 @@ export async function updateRelationship(
     if (!session?.user) return { error: "Unauthorized" };
     if (!session.user.id) return { error: "Unauthorized" };
     const userId = session.user.id;
+    const graphContext = await requireGraphPermissionForPerson(prisma, userId, personId, 'edit')
 
     try {
         const family = await prisma.family.findFirst({
@@ -809,6 +927,18 @@ export async function updateRelationship(
                     where: { id: divorceEvent.id }
                 });
             }
+
+            await createGraphAuditEntry(tx, {
+                graphId: graphContext.graphId,
+                actorUserId: userId,
+                action: 'RELATIONSHIP_UPDATED',
+                entityType: 'FAMILY',
+                entityId: family.id,
+                details: {
+                    spouseId,
+                    status: data.status,
+                },
+            })
         });
 
         revalidatePath('/dashboard');
@@ -833,6 +963,7 @@ export async function linkExistingPersonAsSpouse(
     const session = await auth();
     if (!session?.user?.id) return { error: "Unauthorized" };
     const userId = session.user.id;
+    const graphContext = await requireGraphPermissionForPerson(prisma, userId, personId, 'edit')
 
     try {
         const result = await prisma.$transaction(async (tx) => {
@@ -894,6 +1025,7 @@ export async function linkExistingPersonAsSpouse(
 
             const family = await tx.family.create({
                 data: {
+                    graphId: graphContext.graphId,
                     parent1Id: personId,
                     parent2Id: spouseId,
                     events: {
@@ -960,6 +1092,26 @@ export async function linkExistingPersonAsSpouse(
                 computedDistance: distance,
             })
 
+            await tx.person.updateMany({
+                where: {
+                    id: { in: [personId, spouseId] },
+                    graphId: null,
+                },
+                data: { graphId: graphContext.graphId },
+            })
+
+            await createGraphAuditEntry(tx, {
+                graphId: graphContext.graphId,
+                actorUserId: userId,
+                action: 'EXISTING_SPOUSE_LINKED',
+                entityType: 'FAMILY',
+                entityId: family.id,
+                details: {
+                    personId,
+                    spouseId,
+                },
+            })
+
             return { success: true, familyId: family.id }
         })
 
@@ -981,6 +1133,7 @@ export async function linkExistingPersonAsParent(
     const session = await auth();
     if (!session?.user?.id) return { error: "Unauthorized" };
     const userId = session.user.id;
+    const graphContext = await requireGraphPermissionForPerson(prisma, userId, childId, 'edit')
 
     try {
         const result = await prisma.$transaction(async (tx) => {
@@ -1051,6 +1204,7 @@ export async function linkExistingPersonAsParent(
             if (!child.childOfFamily) {
                 const family = await tx.family.create({
                     data: {
+                        graphId: graphContext.graphId,
                         parent1Id: parentId,
                         children: { connect: { id: childId } }
                     },
@@ -1092,6 +1246,14 @@ export async function linkExistingPersonAsParent(
                 computedDistance: distance,
             })
 
+            await tx.person.updateMany({
+                where: {
+                    id: { in: [childId, parentId] },
+                    graphId: null,
+                },
+                data: { graphId: graphContext.graphId },
+            })
+
             await tx.familyEvent.create({
                 data: {
                     type: 'RELATIONSHIP_LINK_PARENT',
@@ -1104,6 +1266,18 @@ export async function linkExistingPersonAsParent(
                         familyId,
                     })
                 }
+            })
+
+            await createGraphAuditEntry(tx, {
+                graphId: graphContext.graphId,
+                actorUserId: userId,
+                action: 'EXISTING_PARENT_LINKED',
+                entityType: 'FAMILY',
+                entityId: familyId,
+                details: {
+                    childId,
+                    parentId,
+                },
             })
 
             return { success: true, familyId }
@@ -1127,6 +1301,7 @@ export async function linkExistingPersonAsChild(
     const session = await auth();
     if (!session?.user?.id) return { error: "Unauthorized" };
     const userId = session.user.id;
+    const graphContext = await requireGraphPermissionForPerson(prisma, userId, parentId, 'edit')
 
     try {
         const result = await prisma.$transaction(async (tx) => {
@@ -1228,6 +1403,7 @@ export async function linkExistingPersonAsChild(
             } else {
                 const family = await tx.family.create({
                     data: {
+                        graphId: graphContext.graphId,
                         parent1Id: parentId,
                         children: { connect: { id: childId } }
                     },
@@ -1261,6 +1437,14 @@ export async function linkExistingPersonAsChild(
                 computedDistance: distance,
             })
 
+            await tx.person.updateMany({
+                where: {
+                    id: { in: [parentId, childId] },
+                    graphId: null,
+                },
+                data: { graphId: graphContext.graphId },
+            })
+
             await tx.familyEvent.create({
                 data: {
                     type: 'RELATIONSHIP_LINK_CHILD',
@@ -1273,6 +1457,18 @@ export async function linkExistingPersonAsChild(
                         familyId,
                     })
                 }
+            })
+
+            await createGraphAuditEntry(tx, {
+                graphId: graphContext.graphId,
+                actorUserId: userId,
+                action: 'EXISTING_CHILD_LINKED',
+                entityType: 'FAMILY',
+                entityId: familyId,
+                details: {
+                    parentId,
+                    childId,
+                },
             })
 
             return { success: true, familyId }
@@ -1299,6 +1495,7 @@ export async function associateChildWithSpouse(
     if (!session?.user) return { error: "Unauthorized" };
     if (!session.user.id) return { error: "Unauthorized" };
     const userId = session.user.id;
+    const graphContext = await requireGraphPermissionForPerson(prisma, userId, personId, 'edit')
 
     try {
         const result = await prisma.$transaction(async (tx) => {
@@ -1413,6 +1610,27 @@ export async function associateChildWithSpouse(
                     })
                 }
             }
+
+            await tx.person.updateMany({
+                where: {
+                    id: { in: [personId, spouseId, childId] },
+                    graphId: null,
+                },
+                data: { graphId: graphContext.graphId },
+            })
+
+            await createGraphAuditEntry(tx, {
+                graphId: graphContext.graphId,
+                actorUserId: userId,
+                action: 'CHILD_ASSOCIATED_WITH_SPOUSE',
+                entityType: 'FAMILY',
+                entityId: spouseFamilyId,
+                details: {
+                    personId,
+                    spouseId,
+                    childId,
+                },
+            })
 
             return { success: true }
         })

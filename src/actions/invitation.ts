@@ -5,25 +5,17 @@ import { auth } from '@/auth'
 import { createPersonClaims, upsertUserPersonLink } from '@/lib/graph'
 import type { Prisma } from '@prisma/client'
 import { randomBytes } from 'crypto'
+import { requireGraphPermissionForPerson } from '@/actions/graphManagement'
 
 export async function inviteUser(personId: string, email: string) {
     const session = await auth();
     if (!session?.user) return { error: "Unauthorized" };
     if (!session.user.id) return { error: "Unauthorized" };
     const userId = session.user.id;
+    await requireGraphPermissionForPerson(prisma, userId, personId, 'manage')
 
     const person = await prisma.person.findUnique({ where: { id: personId } });
     if (!person) return { error: "Person not found" };
-    
-    // Allow inviting if the user created the person OR if the user is linked to someone in the same tree?
-    // For simplicity, let's stick to creator or maybe relax it later.
-    // If I am navigating the tree, I should be able to invite my brother to claim his node.
-    // Even if I didn't create him (maybe my father did), I should be able to invite?
-    // For now, let's keep it to creator to avoid spam, or check if user has access to this tree.
-    // But "createdById" is simple.
-    if (person.createdById !== userId) {
-        // return { error: "Only creator can invite" };
-    }
 
     const token = randomBytes(32).toString('hex');
     

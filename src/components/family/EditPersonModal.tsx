@@ -18,6 +18,7 @@ interface EditPersonModalProps {
     placeOfBirth?: string | null;
     dateOfDeath?: string | Date | null;
     placeOfDeath?: string | null;
+    updatedAt?: string | Date | null;
     photos?: Array<{
       id?: string;
       url: string;
@@ -125,7 +126,8 @@ export default function EditPersonModal({ person, onClose, onSuccess }: EditPers
         photoUrl: formData.photoUrl || undefined,
         photoDate: formData.photoDate ? new Date(formData.photoDate) : undefined,
         replacePhoto,
-        removePhoto
+        removePhoto,
+        lastKnownUpdatedAt: person.updatedAt ? new Date(person.updatedAt) : undefined,
       };
       
       const result = await updatePerson(person.id, data);
