@@ -367,8 +367,21 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
   const allowEdit = Boolean(data.graphPermission?.canEdit);
   const allowManage = Boolean(data.graphPermission?.canManage);
   const activeRole = collabBar?.me.role?.toLowerCase() ?? 'member'
-  const canInvite = Boolean(collabBar?.me.canInvite)
-  const allowedInviteRoles = collabBar?.me.allowedInviteRoles ?? []
+  const normalizedGraphRole =
+    typeof collabBar?.me.role === 'string' ? collabBar.me.role.trim().toUpperCase() : ''
+  const derivedInviteRoles =
+    normalizedGraphRole === 'ADMIN' || normalizedGraphRole === 'OWNER'
+      ? ['EDITOR', 'COMMENTER', 'VIEWER']
+      : normalizedGraphRole === 'EDITOR'
+        ? ['EDITOR', 'VIEWER']
+        : normalizedGraphRole === 'COMMENTER' || normalizedGraphRole === 'VIEWER'
+          ? ['VIEWER']
+          : []
+  const allowedInviteRoles =
+    Array.isArray(collabBar?.me.allowedInviteRoles) && collabBar.me.allowedInviteRoles.length > 0
+      ? collabBar.me.allowedInviteRoles
+      : derivedInviteRoles
+  const canInvite = typeof collabBar?.me.canInvite === 'boolean' ? collabBar.me.canInvite : allowedInviteRoles.length > 0
   const roleAliases = buildRoleAliases({
       parent: parents,
       spouse: spouses,
@@ -383,7 +396,11 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
           <GraphCollaborationBar
             data={{
               graph: collabBar.graph,
-              me: collabBar.me,
+              me: {
+                ...collabBar.me,
+                canInvite,
+                allowedInviteRoles,
+              },
               members: collabBar.members,
               pendingInvites: collabBar.pendingInvites,
               reviewCount: (reviewSummary?.totalConflictFields ?? 0) + (reviewSummary?.totalOpenLinks ?? 0),
@@ -402,10 +419,10 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
               setHighlightedPersonId(personId)
             }}
           />
-          {inviteOpen && collabBar.me.canInvite ? (
+          {inviteOpen && canInvite ? (
             <GraphInviteQuickModal
               graphName={collabBar.graph.name}
-              allowedInviteRoles={collabBar.me.allowedInviteRoles}
+              allowedInviteRoles={allowedInviteRoles}
               onClose={() => setInviteOpen(false)}
             />
           ) : null}
