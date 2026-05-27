@@ -14,48 +14,52 @@ model User {
   password      String?
   emailVerified DateTime?
   image         String?
-  
-  rootPersonId  String?   @unique
-  rootPerson    Person?   @relation("UserRootPerson", fields: [rootPersonId], references: [id])
+
+  rootPersonId   String?      @unique
+  rootPerson     Person?      @relation("UserRootPerson", fields: [rootPersonId], references: [id])
   currentGraphId String?
   currentGraph   FamilyGraph? @relation("UserCurrentGraph", fields: [currentGraphId], references: [id])
-  
-  createdPeople Person[]  @relation("CreatedBy")
-  contributedLayers PersonLayer[]
-  sentInvitations Invitation[]
-  personLinks   UserPersonLink[]
-  personClaims  PersonClaim[] @relation("PersonClaimContributor")
-  relationshipClaims RelationshipClaim[] @relation("RelationshipClaimContributor")
-  createdPersonLinks PersonLink[] @relation("PersonLinkCreatedBy")
-  resolutionCases ResolutionCase[] @relation("ResolutionCaseCreatedBy")
-  adminGraphs   FamilyGraph[] @relation("GraphAdmin")
-  graphMemberships GraphMembership[] @relation("GraphMembershipUser")
-  sentGraphInvitations GraphInvitation[] @relation("GraphInvitationInviter")
-  receivedGraphInvitations GraphInvitation[] @relation("GraphInvitationInvitee")
-  graphAuditLogs GraphAuditLog[] @relation("GraphAuditActor")
-  invitedGraphMemberships GraphMembership[] @relation("GraphMembershipInvitedBy")
-  passwordResetTokens PasswordResetToken[]
-  
-  accounts      Account[]
-  sessions      Session[]
-  
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+
+  createdPeople                 Person[]               @relation("CreatedBy")
+  contributedLayers             PersonLayer[]
+  sentInvitations               Invitation[]
+  personLinks                   UserPersonLink[]
+  personClaims                  PersonClaim[]          @relation("PersonClaimContributor")
+  relationshipClaims            RelationshipClaim[]    @relation("RelationshipClaimContributor")
+  createdPersonLinks            PersonLink[]           @relation("PersonLinkCreatedBy")
+  resolutionCases               ResolutionCase[]       @relation("ResolutionCaseCreatedBy")
+  adminGraphs                   FamilyGraph[]          @relation("GraphAdmin")
+  graphMemberships              GraphMembership[]      @relation("GraphMembershipUser")
+  sentGraphInvitations          GraphInvitation[]      @relation("GraphInvitationInviter")
+  receivedGraphInvitations      GraphInvitation[]      @relation("GraphInvitationInvitee")
+  claimedGraphInvitations       GraphInvitation[]      @relation("GraphInvitationClaimedBy")
+  graphAuditLogs                GraphAuditLog[]        @relation("GraphAuditActor")
+  invitedGraphMemberships       GraphMembership[]      @relation("GraphMembershipInvitedBy")
+  approvedGraphMemberships      GraphMembership[]      @relation("GraphMembershipApprovedBy")
+  createdGraphMembershipScopes  GraphMembershipScope[] @relation("GraphMembershipScopeCreatedBy")
+  approvedGraphMembershipScopes GraphMembershipScope[] @relation("GraphMembershipScopeApprovedBy")
+  passwordResetTokens           PasswordResetToken[]
+
+  accounts Account[]
+  sessions Session[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Account {
-  id                 String  @id @default(cuid())
-  userId             String
-  type               String
-  provider           String
-  providerAccountId  String
-  refresh_token      String?
-  access_token       String?
-  expires_at         Int?
-  token_type         String?
-  scope              String?
-  id_token           String?
-  session_state      String?
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -79,43 +83,46 @@ model VerificationToken {
 }
 
 model PasswordResetToken {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   userId     String
   email      String
-  token      String   @unique
+  token      String    @unique
   expiresAt  DateTime
   consumedAt DateTime?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
 
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
   @@index([email, createdAt])
 }
 
 model Person {
-  id          String    @id @default(cuid())
-  graphId      String?
-  firstName   String
-  lastName    String?
-  middleName  String?
-  nickName    String?
-  title       String?
-  gender      String?
-  
-  dateOfBirth DateTime?
+  id                  String  @id @default(cuid())
+  graphId             String?
+  firstName           String
+  lastName            String?
+  middleName          String?
+  nickName            String?
+  title               String?
+  gender              String?
+  educationHistory    Json?
+  professionalHistory Json?
+  livingHistory       Json?
+
+  dateOfBirth  DateTime?
   placeOfBirth String?
-  dateOfDeath DateTime?
+  dateOfDeath  DateTime?
   placeOfDeath String?
-  
+
   createdById String
-  createdBy   User   @relation("CreatedBy", fields: [createdById], references: [id])
+  createdBy   User         @relation("CreatedBy", fields: [createdById], references: [id])
   graph       FamilyGraph? @relation("GraphPeople", fields: [graphId], references: [id])
-  
-  linkedUserId String? @unique
-  linkedUser   User?   @relation("UserRootPerson")
+
+  linkedUserId String?      @unique
+  linkedUser   User?        @relation("UserRootPerson")
   rootOfGraph  FamilyGraph? @relation("GraphRootPerson")
-  
+
   // Relationships via Family
   // The family this person is a child of
   childOfFamilyId String?
@@ -126,196 +133,266 @@ model Person {
   familiesAsParent2 Family[] @relation("FamilyParent2")
 
   // Personal events (Birth, Death)
-  events       FamilyEvent[] @relation("PersonEvents")
-  
-  photos      Photo[]
-  invitations Invitation[]
-  layers      PersonLayer[]
-  userLinks   UserPersonLink[]
-  claims      PersonClaim[]
-  outgoingRelationships RelationshipClaim[] @relation("RelationshipFromPerson")
-  incomingRelationships RelationshipClaim[] @relation("RelationshipToPerson")
-  leftLinks   PersonLink[] @relation("PersonLinkLeft")
-  rightLinks  PersonLink[] @relation("PersonLinkRight")
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  events FamilyEvent[] @relation("PersonEvents")
+
+  photos                        Photo[]
+  invitations                   Invitation[]
+  targetGraphInvitations        GraphInvitation[]      @relation("GraphInvitationTargetPerson")
+  layers                        PersonLayer[]
+  userLinks                     UserPersonLink[]
+  claims                        PersonClaim[]
+  anchoredGraphMembershipScopes GraphMembershipScope[] @relation("GraphMembershipScopeAnchorPerson")
+  outgoingRelationships         RelationshipClaim[]    @relation("RelationshipFromPerson")
+  incomingRelationships         RelationshipClaim[]    @relation("RelationshipToPerson")
+  leftLinks                     PersonLink[]           @relation("PersonLinkLeft")
+  rightLinks                    PersonLink[]           @relation("PersonLinkRight")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model PersonLayer {
-  id            String    @id @default(cuid())
-  personId      String
-  person        Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
-  
+  id       String @id @default(cuid())
+  personId String
+  person   Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+
   // Data fields (snapshot of Person fields)
-  firstName     String?
-  lastName      String?
-  middleName    String?
-  nickName      String?
-  title         String?
-  gender        String?
-  dateOfBirth   DateTime?
-  placeOfBirth  String?
-  dateOfDeath   DateTime?
-  placeOfDeath  String?
-  
+  firstName           String?
+  lastName            String?
+  middleName          String?
+  nickName            String?
+  title               String?
+  gender              String?
+  educationHistory    Json?
+  professionalHistory Json?
+  dateOfBirth         DateTime?
+  placeOfBirth        String?
+  dateOfDeath         DateTime?
+  placeOfDeath        String?
+
   // Meta
-  contributorId String? 
-  contributor   User?     @relation(fields: [contributorId], references: [id])
-  
+  contributorId String?
+  contributor   User?   @relation(fields: [contributorId], references: [id])
+
   relationshipDistance Int? // 0=Self, 1=Parent/Child, etc.
   confidenceScore      Float @default(1.0)
-  
-  createdAt     DateTime  @default(now())
+
+  createdAt DateTime @default(now())
 }
 
 model Family {
-  id          String   @id @default(cuid())
-  graphId     String?
-  graph       FamilyGraph? @relation("GraphFamilies", fields: [graphId], references: [id])
+  id      String       @id @default(cuid())
+  graphId String?
+  graph   FamilyGraph? @relation("GraphFamilies", fields: [graphId], references: [id])
 
-  parent1Id   String?
-  parent1     Person?  @relation("FamilyParent1", fields: [parent1Id], references: [id])
+  parent1Id String?
+  parent1   Person? @relation("FamilyParent1", fields: [parent1Id], references: [id])
 
-  parent2Id   String?
-  parent2     Person?  @relation("FamilyParent2", fields: [parent2Id], references: [id])
+  parent2Id String?
+  parent2   Person? @relation("FamilyParent2", fields: [parent2Id], references: [id])
 
-  children    Person[] @relation("FamilyChildren")
+  children Person[] @relation("FamilyChildren")
 
-  events      FamilyEvent[] @relation("FamilyEvents") // Marriage, Divorce
+  events FamilyEvent[] @relation("FamilyEvents") // Marriage, Divorce
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model FamilyEvent {
-  id          String   @id @default(cuid())
-  type        String   // BIRTH, DEATH, MARRIAGE, DIVORCE
+  id          String    @id @default(cuid())
+  type        String // BIRTH, DEATH, MARRIAGE, DIVORCE
   date        DateTime?
   place       String?
   description String?
-  
+
   // Event can belong to a Person (Birth, Death)
-  personId    String?
-  person      Person?  @relation("PersonEvents", fields: [personId], references: [id], onDelete: Cascade)
-  
+  personId String?
+  person   Person? @relation("PersonEvents", fields: [personId], references: [id], onDelete: Cascade)
+
   // OR Event can belong to a Family (Marriage, Divorce)
-  familyId    String?
-  family      Family?  @relation("FamilyEvents", fields: [familyId], references: [id], onDelete: Cascade)
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  familyId String?
+  family   Family? @relation("FamilyEvents", fields: [familyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Photo {
-  id          String   @id @default(cuid())
-  url         String
-  caption     String?
-  date        DateTime?
-  data        Bytes?
-  mimeType    String?
-  personId    String
-  person      Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String    @id @default(cuid())
+  url           String
+  caption       String?
+  date          DateTime?
+  albumCategory String?
+  ageLabel      String?
+  locationLabel String?
+  isGroupPhoto  Boolean   @default(false)
+  peopleTags    Json?
+  data          Bytes?
+  mimeType      String?
+  personId      String
+  person        Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Invitation {
-  id        String   @id @default(cuid())
+  id        String @id @default(cuid())
   email     String
   personId  String
-  person    Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
-  token     String   @unique
-  status    String   @default("PENDING") 
+  person    Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+  token     String @unique
+  status    String @default("PENDING")
   inviterId String
-  inviter   User     @relation(fields: [inviterId], references: [id])
-  
+  inviter   User   @relation(fields: [inviterId], references: [id])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model FamilyGraph {
-  id            String   @id @default(cuid())
-  name          String
-  adminUserId   String
-  rootPersonId  String?  @unique
-  status        String   @default("ACTIVE")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(cuid())
+  name         String
+  adminUserId  String
+  rootPersonId String?  @unique
+  status       String   @default("ACTIVE")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  adminUser     User     @relation("GraphAdmin", fields: [adminUserId], references: [id], onDelete: Cascade)
-  rootPerson    Person?  @relation("GraphRootPerson", fields: [rootPersonId], references: [id])
-  currentUsers  User[]   @relation("UserCurrentGraph")
-  people        Person[] @relation("GraphPeople")
-  families      Family[] @relation("GraphFamilies")
-  memberships   GraphMembership[]
-  invitations   GraphInvitation[]
-  auditLogs     GraphAuditLog[]
+  adminUser    User                   @relation("GraphAdmin", fields: [adminUserId], references: [id], onDelete: Cascade)
+  rootPerson   Person?                @relation("GraphRootPerson", fields: [rootPersonId], references: [id])
+  currentUsers User[]                 @relation("UserCurrentGraph")
+  people       Person[]               @relation("GraphPeople")
+  families     Family[]               @relation("GraphFamilies")
+  memberships  GraphMembership[]
+  invitations  GraphInvitation[]
+  scopes       GraphMembershipScope[]
+  auditLogs    GraphAuditLog[]
 
   @@index([adminUserId, status])
 }
 
 model GraphMembership {
-  id             String   @id @default(cuid())
-  graphId        String
-  userId         String
-  role           String   @default("EDITOR")
-  status         String   @default("ACTIVE")
-  invitedByUserId String?
-  invitationId   String?
-  lastSeenAt     DateTime?
-  lastActivityAt DateTime?
-  currentPersonId String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id               String    @id @default(cuid())
+  graphId          String
+  userId           String
+  role             String    @default("EDITOR")
+  status           String    @default("ACTIVE")
+  trustLevel       String    @default("REGISTERED")
+  scopeMode        String    @default("FULL")
+  invitedByUserId  String?
+  invitationId     String?
+  approvedByUserId String?
+  verifiedAt       DateTime?
+  suspendedAt      DateTime?
+  suspensionReason String?
+  revokedAt        DateTime?
+  revocationReason String?
+  lastSeenAt       DateTime?
+  lastActivityAt   DateTime?
+  currentPersonId  String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  graph          FamilyGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
-  user           User        @relation("GraphMembershipUser", fields: [userId], references: [id], onDelete: Cascade)
-  invitedBy      User?       @relation("GraphMembershipInvitedBy", fields: [invitedByUserId], references: [id])
+  graph      FamilyGraph            @relation(fields: [graphId], references: [id], onDelete: Cascade)
+  user       User                   @relation("GraphMembershipUser", fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy  User?                  @relation("GraphMembershipInvitedBy", fields: [invitedByUserId], references: [id])
+  approvedBy User?                  @relation("GraphMembershipApprovedBy", fields: [approvedByUserId], references: [id])
+  scopes     GraphMembershipScope[]
 
   @@unique([graphId, userId])
   @@index([graphId, status, role])
+  @@index([graphId, trustLevel, status])
 }
 
 model GraphInvitation {
-  id             String   @id @default(cuid())
-  graphId        String
-  email          String
-  role           String   @default("EDITOR")
-  token          String   @unique
-  status         String   @default("PENDING")
-  invitedByUserId String
-  invitedUserId  String?
-  expiresAt      DateTime
-  acceptedAt     DateTime?
-  revokedAt      DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id               String    @id @default(cuid())
+  graphId          String
+  email            String
+  purpose          String    @default("COLLABORATION")
+  role             String    @default("EDITOR")
+  token            String    @unique
+  tokenHash        String?   @unique
+  status           String    @default("PENDING")
+  invitedByUserId  String
+  invitedUserId    String?
+  claimedByUserId  String?
+  targetPersonId   String?
+  previewScopeJson Json?
+  branchScopeJson  Json?
+  expiresAt        DateTime
+  openedAt         DateTime?
+  acceptedAt       DateTime?
+  registeredAt     DateTime?
+  verifiedAt       DateTime?
+  convertedAt      DateTime?
+  consumedAt       DateTime?
+  failureCount     Int       @default(0)
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  graph          FamilyGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
-  invitedBy      User        @relation("GraphInvitationInviter", fields: [invitedByUserId], references: [id], onDelete: Cascade)
-  invitedUser    User?       @relation("GraphInvitationInvitee", fields: [invitedUserId], references: [id])
+  graph         FamilyGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
+  invitedBy     User        @relation("GraphInvitationInviter", fields: [invitedByUserId], references: [id], onDelete: Cascade)
+  invitedUser   User?       @relation("GraphInvitationInvitee", fields: [invitedUserId], references: [id])
+  claimedByUser User?       @relation("GraphInvitationClaimedBy", fields: [claimedByUserId], references: [id])
+  targetPerson  Person?     @relation("GraphInvitationTargetPerson", fields: [targetPersonId], references: [id])
 
   @@index([graphId, status, expiresAt])
   @@index([email, status])
+  @@index([graphId, tokenHash])
 }
 
 model GraphAuditLog {
-  id             String   @id @default(cuid())
-  graphId        String
-  actorUserId    String?
-  action         String
-  entityType     String
-  entityId       String?
-  detailsJson    Json?
-  createdAt      DateTime @default(now())
+  id                String   @id @default(cuid())
+  graphId           String
+  actorUserId       String?
+  actorMembershipId String?
+  actorRole         String?
+  actorTrustLevel   String?
+  action            String
+  entityType        String
+  entityId          String?
+  previousValueJson Json?
+  newValueJson      Json?
+  reason            String?
+  evidenceJson      Json?
+  branchScopeJson   Json?
+  approvalState     String?
+  requestId         String?
+  detailsJson       Json?
+  createdAt         DateTime @default(now())
 
-  graph          FamilyGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
-  actorUser      User?       @relation("GraphAuditActor", fields: [actorUserId], references: [id])
+  graph     FamilyGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
+  actorUser User?       @relation("GraphAuditActor", fields: [actorUserId], references: [id])
 
   @@index([graphId, createdAt])
   @@index([action, entityType])
+}
+
+model GraphMembershipScope {
+  id               String    @id @default(cuid())
+  graphId          String
+  membershipId     String
+  anchorPersonId   String
+  scopeJson        Json
+  status           String    @default("ACTIVE")
+  expiresAt        DateTime?
+  createdByUserId  String
+  approvedByUserId String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  graph        FamilyGraph     @relation(fields: [graphId], references: [id], onDelete: Cascade)
+  membership   GraphMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  anchorPerson Person          @relation("GraphMembershipScopeAnchorPerson", fields: [anchorPersonId], references: [id], onDelete: Cascade)
+  createdBy    User            @relation("GraphMembershipScopeCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  approvedBy   User?           @relation("GraphMembershipScopeApprovedBy", fields: [approvedByUserId], references: [id])
+
+  @@index([graphId, membershipId, status])
+  @@index([anchorPersonId])
+  @@index([expiresAt])
 }
 
 model UserPersonLink {
@@ -332,8 +409,8 @@ model UserPersonLink {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  person           Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
 
   @@unique([userId, personId])
   @@index([personId, computedDistance])
@@ -357,33 +434,33 @@ model PersonClaim {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  person             Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
-  contributor        User?    @relation("PersonClaimContributor", fields: [contributorId], references: [id])
+  person      Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+  contributor User?  @relation("PersonClaimContributor", fields: [contributorId], references: [id])
 
   @@index([personId, field, resolutionStatus])
   @@index([contributorId, createdAt])
 }
 
 model RelationshipClaim {
-  id                 String   @id @default(cuid())
-  fromPersonId       String
-  toPersonId         String
-  relationshipType   String
-  contributorId      String?
-  sourceType         String   @default("USER")
-  sourceRefId        String?
-  assertedDistance   Int?
-  computedDistance   Int?
-  confidenceScore    Float    @default(1.0)
-  resolutionStatus   String   @default("ACTIVE")
-  validFrom          DateTime?
-  validTo            DateTime?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id               String    @id @default(cuid())
+  fromPersonId     String
+  toPersonId       String
+  relationshipType String
+  contributorId    String?
+  sourceType       String    @default("USER")
+  sourceRefId      String?
+  assertedDistance Int?
+  computedDistance Int?
+  confidenceScore  Float     @default(1.0)
+  resolutionStatus String    @default("ACTIVE")
+  validFrom        DateTime?
+  validTo          DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  fromPerson         Person   @relation("RelationshipFromPerson", fields: [fromPersonId], references: [id], onDelete: Cascade)
-  toPerson           Person   @relation("RelationshipToPerson", fields: [toPersonId], references: [id], onDelete: Cascade)
-  contributor        User?    @relation("RelationshipClaimContributor", fields: [contributorId], references: [id])
+  fromPerson  Person @relation("RelationshipFromPerson", fields: [fromPersonId], references: [id], onDelete: Cascade)
+  toPerson    Person @relation("RelationshipToPerson", fields: [toPersonId], references: [id], onDelete: Cascade)
+  contributor User?  @relation("RelationshipClaimContributor", fields: [contributorId], references: [id])
 
   @@index([fromPersonId, relationshipType, resolutionStatus])
   @@index([toPersonId, relationshipType, resolutionStatus])
@@ -402,26 +479,26 @@ model PersonLink {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  leftPerson       Person   @relation("PersonLinkLeft", fields: [leftPersonId], references: [id], onDelete: Cascade)
-  rightPerson      Person   @relation("PersonLinkRight", fields: [rightPersonId], references: [id], onDelete: Cascade)
-  createdBy        User?    @relation("PersonLinkCreatedBy", fields: [createdByUserId], references: [id])
+  leftPerson  Person @relation("PersonLinkLeft", fields: [leftPersonId], references: [id], onDelete: Cascade)
+  rightPerson Person @relation("PersonLinkRight", fields: [rightPersonId], references: [id], onDelete: Cascade)
+  createdBy   User?  @relation("PersonLinkCreatedBy", fields: [createdByUserId], references: [id])
 
   @@unique([leftPersonId, rightPersonId])
   @@index([resolutionStatus, linkType])
 }
 
 model ResolutionCase {
-  id               String   @id @default(cuid())
-  entityType       String
-  entityRefId      String
-  field            String?
-  status           String   @default("OPEN")
-  rationaleJson    Json?
-  createdByUserId  String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id              String   @id @default(cuid())
+  entityType      String
+  entityRefId     String
+  field           String?
+  status          String   @default("OPEN")
+  rationaleJson   Json?
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  createdBy        User?    @relation("ResolutionCaseCreatedBy", fields: [createdByUserId], references: [id])
+  createdBy User? @relation("ResolutionCaseCreatedBy", fields: [createdByUserId], references: [id])
 
   @@index([entityType, entityRefId, status])
 }

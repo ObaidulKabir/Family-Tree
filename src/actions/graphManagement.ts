@@ -1,6 +1,6 @@
 'use server'
 
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 
 import type { Prisma, PrismaClient } from '@prisma/client'
 
@@ -8,12 +8,11 @@ import { auth } from '@/auth'
 import { prisma } from '@/lib/prisma'
 import {
   buildGraphAuditDetails,
-  canEditGraph,
   canManageGraph,
-  canViewGraph,
   getContributorPresence,
   isGraphInvitationExpired,
 } from '@/lib/graphManagement'
+import { authorizePersonAccess } from '@/lib/collab/authorize'
 import { revalidatePath } from 'next/cache'
 
 const GRAPH_INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000
@@ -281,75 +280,7 @@ export async function getCurrentGraphContext(userId: string, displayName: string
   })
 }
 
-export async function requireGraphPermissionForPerson(
-  tx: DbClient,
-  userId: string,
-  personId: string,
-  mode: 'view' | 'edit' | 'manage'
-) {
-  const [user, person] = await Promise.all([
-    tx.user.findUnique({
-      where: { id: userId },
-      select: { currentGraphId: true },
-    }),
-    tx.person.findUnique({
-      where: { id: personId },
-      select: { id: true, graphId: true },
-    }),
-  ])
-
-  if (!person) {
-    throw new Error('Person not found')
-  }
-
-  const graphId = person.graphId ?? user?.currentGraphId ?? null
-  if (!graphId) {
-    throw new Error('Graph context not found')
-  }
-
-  const membership = await tx.graphMembership.findUnique({
-    where: {
-      graphId_userId: {
-        graphId,
-        userId,
-      },
-    },
-    select: {
-      role: true,
-      status: true,
-    },
-  })
-
-  if (!membership || membership.status !== 'ACTIVE') {
-    throw new Error('Access revoked')
-  }
-
-  if (mode === 'view' && !canViewGraph(membership.role)) {
-    throw new Error('Forbidden')
-  }
-
-  if (mode === 'edit' && !canEditGraph(membership.role)) {
-    throw new Error('You do not have permission to edit this graph.')
-  }
-
-  if (mode === 'manage' && !canManageGraph(membership.role)) {
-    throw new Error('Only the graph admin can manage contributors.')
-  }
-
-  if (!person.graphId && 'person' in tx) {
-    await tx.person.update({
-      where: { id: personId },
-      data: { graphId },
-    })
-  }
-
-  return {
-    graphId,
-    role: membership.role,
-  }
-}
-
-async function getAdminGraphForSession(userId: string) {
+async function getActiveGraphForSession(userId: string, options?: { requireManage?: boolean }) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
@@ -359,39 +290,194 @@ async function getAdminGraphForSession(userId: string) {
     },
   })
 
-  if (user?.rootPersonId) {
-    await ensurePrimaryGraphForUser(
+  if (!user?.rootPersonId) {
+    throw new Error('No active graph found for this account.')
+  }
+
+  const currentGraph = await getCurrentGraphContext(
+    user.id,
+    user.name ?? 'User',
+    user.rootPersonId
+  )
+
+  if (!currentGraph.graphId || !currentGraph.role) {
+    throw new Error('No active graph found for this account.')
+  }
+
+  if (options?.requireManage && !canManageGraph(currentGraph.role)) {
+    throw new Error('You do not have permission to manage the active graph.')
+  }
+
+  const graph = await prisma.familyGraph.findUnique({
+    where: { id: currentGraph.graphId },
+    select: {
+      id: true,
+      name: true,
+      rootPersonId: true,
+      adminUserId: true,
+      updatedAt: true,
+    },
+  })
+
+  if (!graph) {
+    throw new Error('Active graph not found.')
+  }
+
+  return {
+    ...graph,
+    role: currentGraph.role,
+  }
+}
+
+export async function getAvailableGraphsForSession() {
+  const session = await auth()
+  if (!session?.user?.id) return { error: 'Unauthorized' as const }
+  const userId = session.user.id
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        rootPersonId: true,
+      },
+    })
+
+    if (!user?.rootPersonId) {
+      return { error: null, currentGraphId: null, graphs: [] }
+    }
+
+    const currentGraph = await getCurrentGraphContext(
       user.id,
       user.name ?? 'User',
       user.rootPersonId
     )
-  }
 
-  const membership = await prisma.graphMembership.findFirst({
-    where: {
-      userId,
-      role: 'ADMIN',
-      status: 'ACTIVE',
-    },
-    include: {
-      graph: {
-        select: {
-          id: true,
-          name: true,
-          rootPersonId: true,
-          adminUserId: true,
-          updatedAt: true,
+    const memberships = await prisma.graphMembership.findMany({
+      where: {
+        userId,
+        status: 'ACTIVE',
+      },
+      include: {
+        graph: {
+          select: {
+            id: true,
+            name: true,
+          },
         },
       },
-    },
-    orderBy: { createdAt: 'asc' },
-  })
+      orderBy: [{ role: 'desc' }, { createdAt: 'asc' }],
+    })
 
-  if (!membership) {
-    throw new Error('No managed graph found for this account.')
+    return {
+      error: null,
+      currentGraphId: currentGraph.graphId,
+      graphs: memberships.map((membership) => ({
+        id: membership.graph.id,
+        name: membership.graph.name,
+        role: membership.role,
+      })),
+    }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Failed to load graphs' }
+  }
+}
+
+export async function switchCurrentGraph(graphId: string) {
+  const session = await auth()
+  if (!session?.user?.id) return { error: 'Unauthorized' as const }
+  const userId = session.user.id
+
+  if (!graphId) return { error: 'Graph id is required.' as const }
+
+  try {
+    const membership = await prisma.graphMembership.findUnique({
+      where: {
+        graphId_userId: {
+          graphId,
+          userId,
+        },
+      },
+      select: {
+        graphId: true,
+        status: true,
+      },
+    })
+
+    if (!membership || membership.status !== 'ACTIVE') {
+      return { error: 'You do not have access to that graph.' as const }
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { currentGraphId: graphId },
+    })
+
+    revalidatePath('/dashboard')
+    revalidatePath('/dashboard/graph-management')
+    revalidatePath('/dashboard/review')
+
+    return { success: true as const }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Failed to switch graph' }
+  }
+}
+
+export async function requireGraphPermissionForPerson(
+  tx: DbClient,
+  userId: string,
+  personId: string,
+  mode: 'view' | 'edit' | 'manage'
+) {
+  const authorization = await authorizePersonAccess(tx, { userId, personId, mode })
+
+  if (authorization.branchScope.checked && !authorization.branchScope.inScope && authorization.branchScope.mode === 'observe') {
+    if ('graphAuditLog' in tx) {
+      await tx.graphAuditLog.create({
+        data: {
+          graphId: authorization.context.graphId,
+          actorUserId: userId,
+          actorMembershipId: authorization.context.membershipId,
+          actorRole: authorization.context.role,
+          actorTrustLevel: authorization.context.trustLevel,
+          action: 'BRANCH_SCOPE_WOULD_DENY',
+          entityType: 'PERSON',
+          entityId: personId,
+          detailsJson: {
+            scopeMode: authorization.context.scopeMode,
+          },
+        },
+      })
+    }
   }
 
-  return membership.graph
+  if (authorization.shouldAttachGraphId && 'person' in tx) {
+    await tx.person.update({
+      where: { id: personId },
+      data: { graphId: authorization.context.graphId },
+    })
+  }
+
+  return {
+    graphId: authorization.context.graphId,
+    membershipId: authorization.context.membershipId,
+    role: authorization.context.role,
+    trustLevel: authorization.context.trustLevel,
+    scopeMode: authorization.context.scopeMode,
+  }
+}
+
+async function getAdminGraphForSession(userId: string) {
+  const graph = await getActiveGraphForSession(userId, { requireManage: true })
+
+  return {
+    id: graph.id,
+    name: graph.name,
+    rootPersonId: graph.rootPersonId,
+    adminUserId: graph.adminUserId,
+    updatedAt: graph.updatedAt,
+  }
 }
 
 export async function getGraphManagementPanelData() {
@@ -486,6 +572,180 @@ export async function getGraphManagementPanelData() {
   }
 }
 
+export async function getGraphCollaborationBarData(graphId: string) {
+  const session = await auth()
+  if (!session?.user?.id) return { error: 'Unauthorized' as const }
+  const userId = session.user.id
+
+  if (!graphId) return { error: 'Graph id is required.' as const }
+
+  try {
+    const membership = await prisma.graphMembership.findUnique({
+      where: {
+        graphId_userId: {
+          graphId,
+          userId,
+        },
+      },
+      select: {
+        id: true,
+        role: true,
+        status: true,
+      },
+    })
+
+    if (!membership || membership.status !== 'ACTIVE') {
+      return { error: 'Access revoked.' as const }
+    }
+
+    const now = new Date()
+
+    const [graph, members, pendingInvites, rawActivity] = await Promise.all([
+      prisma.familyGraph.findUnique({
+        where: { id: graphId },
+        select: { id: true, name: true },
+      }),
+      prisma.graphMembership.findMany({
+        where: { graphId, status: 'ACTIVE' },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+        orderBy: [{ role: 'desc' }, { createdAt: 'asc' }],
+        take: 12,
+      }),
+      canManageGraph(membership.role)
+        ? prisma.graphInvitation.count({
+            where: {
+              graphId,
+              status: 'PENDING',
+              revokedAt: null,
+              expiresAt: { gt: now },
+            },
+          })
+        : Promise.resolve(0),
+      prisma.graphAuditLog.findMany({
+        where: { graphId },
+        include: {
+          actorUser: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 12,
+      }),
+    ])
+
+    if (!graph) return { error: 'Graph not found.' as const }
+
+    const familyIds = rawActivity
+      .filter((item) => item.entityType === 'FAMILY' && item.entityId)
+      .map((item) => item.entityId as string)
+
+    const families = familyIds.length
+      ? await prisma.family.findMany({
+          where: { id: { in: familyIds }, graphId },
+          select: {
+            id: true,
+            parent1Id: true,
+            parent2Id: true,
+            children: { select: { id: true } },
+          },
+        })
+      : []
+
+    const familyMap = new Map(
+      families.map((family) => [
+        family.id,
+        {
+          parent1Id: family.parent1Id,
+          parent2Id: family.parent2Id,
+          childIds: family.children.map((child) => child.id),
+        },
+      ])
+    )
+
+    const activity = rawActivity.map((item) => {
+      const targets: Array<{ personId: string; label: string }> = []
+      const seen = new Set<string>()
+
+      const addTarget = (personId: unknown, label: string) => {
+        if (typeof personId !== 'string' || !personId) return
+        if (seen.has(personId)) return
+        seen.add(personId)
+        targets.push({ personId, label })
+      }
+
+      if (item.entityType === 'PERSON' && item.entityId) {
+        addTarget(item.entityId, 'Person')
+      }
+
+      if (item.entityType === 'FAMILY') {
+        const details = item.detailsJson as Record<string, unknown> | null
+        if (details && typeof details === 'object') {
+          addTarget(details.personId, 'Person')
+          addTarget(details.spouseId, 'Spouse')
+          addTarget(details.parentId, 'Parent')
+          addTarget(details.childId, 'Child')
+          addTarget(details.relationToId, 'Related')
+        }
+
+        if (targets.length === 0 && item.entityId) {
+          const family = familyMap.get(item.entityId)
+          addTarget(family?.parent1Id, 'Parent')
+          addTarget(family?.parent2Id, 'Parent')
+          addTarget(family?.childIds?.[0], 'Child')
+        }
+      }
+
+      return {
+        id: item.id,
+        createdAt: item.createdAt.toISOString(),
+        action: item.action,
+        entityType: item.entityType,
+        entityId: item.entityId,
+        actor: item.actorUser
+          ? {
+              id: item.actorUser.id,
+              name: item.actorUser.name,
+              email: item.actorUser.email,
+            }
+          : null,
+        targets,
+      }
+    })
+
+    return {
+      error: null,
+      graph,
+      me: {
+        role: membership.role,
+        canManage: canManageGraph(membership.role),
+      },
+      members: members.map((member) => ({
+        id: member.user.id,
+        name: member.user.name,
+        email: member.user.email,
+        role: member.role,
+        presence: getContributorPresence(member.lastSeenAt, now),
+      })),
+      pendingInvites,
+      activity,
+    }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Failed to load collaboration data' }
+  }
+}
+
 export async function renameGraph(name: string) {
   const session = await auth()
   if (!session?.user?.id) return { error: 'Unauthorized' as const }
@@ -539,6 +799,7 @@ export async function createGraphInvitation(email: string, role: string) {
   try {
     const graph = await getAdminGraphForSession(userId)
     const token = randomBytes(32).toString('hex')
+    const tokenHash = createHash('sha256').update(token).digest('hex')
     const invitedUser = await prisma.user.findFirst({
       where: { email: normalizedEmail },
       select: { id: true },
@@ -551,6 +812,7 @@ export async function createGraphInvitation(email: string, role: string) {
           email: normalizedEmail,
           role: normalizedRole,
           token,
+          tokenHash,
           invitedByUserId: userId,
           invitedUserId: invitedUser?.id,
           expiresAt: new Date(Date.now() + GRAPH_INVITATION_TTL_MS),
@@ -663,6 +925,16 @@ export async function acceptGraphInvitation(token: string) {
         throw new Error('This invitation is only valid for the invited email address.')
       }
 
+      if (invitation.consumedAt || invitation.convertedAt) {
+        if (invitation.invitedUserId === user.id) {
+          return {
+            success: true,
+            graphName: invitation.graph.name,
+          }
+        }
+        throw new Error('This invitation has already been used.')
+      }
+
       await tx.graphMembership.upsert({
         where: {
           graphId_userId: {
@@ -690,12 +962,17 @@ export async function acceptGraphInvitation(token: string) {
         },
       })
 
+      const now = new Date()
       await tx.graphInvitation.update({
         where: { id: invitation.id },
         data: {
           status: 'ACCEPTED',
-          acceptedAt: new Date(),
+          acceptedAt: now,
           invitedUserId: user.id,
+          claimedByUserId: user.id,
+          registeredAt: now,
+          convertedAt: now,
+          consumedAt: now,
         },
       })
 
