@@ -12,7 +12,7 @@ export default async function Home() {
     <div className="flex flex-col items-center justify-center min-h-screen py-2">
       <main className="flex flex-col items-center justify-center w-full flex-1 px-4 text-center sm:px-10 lg:px-20">
         <h1 className="text-4xl font-bold sm:text-5xl lg:text-6xl">
-          Welcome to <span className="text-blue-600">Familly Explorer</span>
+          Welcome to <span className="text-blue-600">Family Explorer</span>
         </h1>
 
         <p className="mt-3 text-lg sm:text-xl lg:text-2xl">
