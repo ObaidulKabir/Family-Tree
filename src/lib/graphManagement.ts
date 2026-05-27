@@ -15,21 +15,33 @@ const GRAPH_INVITE_ROLE_MAP: Record<GraphRole, GraphRole[]> = {
   OWNER: ['EDITOR', 'COMMENTER', 'VIEWER'],
 }
 
+function normalizeGraphRole(role?: string | null) {
+  if (typeof role !== 'string') return null
+  const normalized = role.trim().toUpperCase()
+  if (!normalized) return null
+  if (!(normalized in GRAPH_ROLE_PRIORITY)) return null
+  return normalized as GraphRole
+}
+
 export function canViewGraph(role?: string | null) {
-  return typeof role === 'string' && role in GRAPH_ROLE_PRIORITY
+  return normalizeGraphRole(role) !== null
 }
 
 export function canEditGraph(role?: string | null) {
-  return typeof role === 'string' && GRAPH_ROLE_PRIORITY[role as GraphRole] >= GRAPH_ROLE_PRIORITY.EDITOR
+  const normalized = normalizeGraphRole(role)
+  if (!normalized) return false
+  return GRAPH_ROLE_PRIORITY[normalized] >= GRAPH_ROLE_PRIORITY.EDITOR
 }
 
 export function canManageGraph(role?: string | null) {
-  return role === 'ADMIN' || role === 'OWNER'
+  const normalized = normalizeGraphRole(role)
+  return normalized === 'ADMIN' || normalized === 'OWNER'
 }
 
 export function getAllowedInviteRoles(role?: string | null) {
-  if (typeof role !== 'string' || !(role in GRAPH_INVITE_ROLE_MAP)) return [] as GraphRole[]
-  return GRAPH_INVITE_ROLE_MAP[role as GraphRole]
+  const normalized = normalizeGraphRole(role)
+  if (!normalized) return [] as GraphRole[]
+  return GRAPH_INVITE_ROLE_MAP[normalized]
 }
 
 export function canInviteGraph(role?: string | null) {
@@ -37,8 +49,9 @@ export function canInviteGraph(role?: string | null) {
 }
 
 export function canInviteGraphRole(role?: string | null, targetRole?: string | null) {
-  if (typeof targetRole !== 'string') return false
-  return getAllowedInviteRoles(role).includes(targetRole as GraphRole)
+  const target = normalizeGraphRole(targetRole)
+  if (!target) return false
+  return getAllowedInviteRoles(role).includes(target)
 }
 
 export function isGraphInvitationExpired(expiresAt: Date, now = new Date()) {
