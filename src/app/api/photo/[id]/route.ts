@@ -1,21 +1,35 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
+import { auth } from '@/auth'
+import { requireGraphPermissionForPerson } from '@/actions/graphManagement'
 import { prisma } from '@/lib/prisma'
 
 export const runtime = 'nodejs'
 
 export async function GET(_: Request, context: { params: Promise<{ id: string }> }) {
+  const session = await auth()
+  if (!session?.user?.id) {
+    return new Response('Unauthorized', { status: 401 })
+  }
+
   const params = await context.params
   const id = params.id
 
   const photo = await prisma.photo.findUnique({
     where: { id },
-    select: { data: true, mimeType: true, url: true },
+    select: { data: true, mimeType: true, url: true, personId: true },
   })
 
   if (!photo) {
     return new Response('Not found', { status: 404 })
+  }
+
+  try {
+    await requireGraphPermissionForPerson(prisma, session.user.id, photo.personId, 'view')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Forbidden'
+    return new Response(message, { status: message === 'Forbidden' ? 403 : 400 })
   }
 
   if (photo.data) {

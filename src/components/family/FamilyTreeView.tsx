@@ -4,7 +4,8 @@ import { format } from 'date-fns';
 import Link from 'next/link';
 import { useState, useEffect, useRef } from 'react';
 import { getPersonDetails, searchPeopleInCurrentGraph } from '@/actions/family';
-import { touchGraphPresence } from '@/actions/graphManagement';
+import { getGraphCollaborationBarData, touchGraphPresence } from '@/actions/graphManagement';
+import { getLatestProfessionalPosition, normalizeProfessionalHistory } from '@/lib/personHistory';
 import { User as UserIcon, Heart, Plus, Share2, Edit2, X } from 'lucide-react';
 import AddPersonModal from './AddPersonModal';
 import InviteModal from './InviteModal';
@@ -12,6 +13,9 @@ import EditPersonModal from './EditPersonModal';
 import DivorceModal from './DivorceModal';
 import AssociateChildModal from './AssociateChildModal';
 import { getAssociableChildrenForSpouse } from '@/lib/familyAssociation';
+import GraphCollaborationBar from '@/components/graph/GraphCollaborationBar';
+import GraphActivityDrawer from '@/components/graph/GraphActivityDrawer';
+import GraphInviteQuickModal from '@/components/graph/GraphInviteQuickModal';
 
 type DateLike = string | Date | null | undefined;
 
@@ -26,6 +30,8 @@ type PersonLike = {
   firstName: string;
   lastName?: string | null;
   title?: string | null;
+  educationHistory?: unknown;
+  professionalHistory?: unknown;
   nickName?: string | null;
   dateOfBirth?: DateLike;
   placeOfBirth?: string | null;
@@ -71,6 +77,14 @@ type FamilyTreeData = {
   };
 };
 
+type CollaborationBarState = {
+  graph: { id: string; name: string };
+  me: { role: string; canManage: boolean; canInvite: boolean; allowedInviteRoles: string[] };
+  members: Array<{ id: string; name?: string | null; email?: string | null; role: string; presence: 'online' | 'away' | 'offline' }>;
+  pendingInvites: number;
+  activity: Array<{ id: string; createdAt: string; action: string; entityType: string; entityId?: string | null; actor?: { id: string; name?: string | null; email?: string | null } | null }>;
+};
+
 function formatDisplayDate(value: DateLike) {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
@@ -95,6 +109,13 @@ function getLifeSummary(person: PersonLike) {
   }
 
   return 'Living'
+}
+
+function getLatestPositionLabel(person: PersonLike) {
+  const latest = getLatestProfessionalPosition(normalizeProfessionalHistory(person.professionalHistory))
+  if (!latest) return null
+
+  return [latest.position, latest.company].filter(Boolean).join(' @ ')
 }
 
 function normalizePhotoUrl(value: string) {
@@ -170,7 +191,11 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
   const [selectedSpouse, setSelectedSpouse] = useState<PersonLike | null>(null);
   const [associationSpouse, setAssociationSpouse] = useState<PersonLike | null>(null);
   const [editingPerson, setEditingPerson] = useState<PersonLike | null>(null);
+  const [openingEditModal, setOpeningEditModal] = useState(false);
   const [addRelationType, setAddRelationType] = useState<'PARENT' | 'CHILD' | 'SPOUSE' | null>(null);
+  const [collabBar, setCollabBar] = useState<CollaborationBarState | null>(null);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   async function loadPerson(id: string) {
     setLoading(true);
@@ -188,6 +213,13 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
   }, [currentPersonId]);
 
   useEffect(() => {
+    setCurrentPersonId(initialPersonId);
+    setHighlightedPersonId(initialPersonId);
+    setInviteOpen(false);
+    setActivityOpen(false);
+  }, [initialPersonId]);
+
+  useEffect(() => {
     if (!data?.graphPermission?.graphId) return;
 
     void touchGraphPresence(currentPersonId);
@@ -197,6 +229,27 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
 
     return () => window.clearInterval(intervalId);
   }, [currentPersonId, data?.graphPermission?.graphId]);
+
+  useEffect(() => {
+    if (!data?.graphPermission?.graphId) return;
+    let cancelled = false;
+    const graphId = data.graphPermission.graphId;
+
+    const load = async () => {
+      const result = await getGraphCollaborationBarData(graphId);
+      if (cancelled) return;
+      if (result && result.error === null) {
+        setCollabBar(result as CollaborationBarState);
+      }
+    };
+
+    void load();
+    const intervalId = window.setInterval(load, 60000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [data?.graphPermission?.graphId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -262,9 +315,21 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
       loadPerson(currentPersonId);
   };
 
-  const handleEdit = (p: PersonLike) => {
-      setEditingPerson(p);
-      setShowEditModal(true);
+  const handleEdit = async (p: PersonLike) => {
+      setOpeningEditModal(true);
+      try {
+        const latestDetails = await getPersonDetails(p.id);
+        if (!('error' in latestDetails)) {
+          setEditingPerson(latestDetails.person as PersonLike);
+        } else {
+          setEditingPerson(p);
+        }
+      } catch {
+        setEditingPerson(p);
+      } finally {
+        setShowEditModal(true);
+        setOpeningEditModal(false);
+      }
   };
 
   const handlePersonUpdated = () => {
@@ -301,6 +366,9 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
   const reviewSummary = data.reviewSummary;
   const allowEdit = Boolean(data.graphPermission?.canEdit);
   const allowManage = Boolean(data.graphPermission?.canManage);
+  const activeRole = collabBar?.me.role?.toLowerCase() ?? 'member'
+  const canInvite = Boolean(collabBar?.me.canInvite)
+  const allowedInviteRoles = collabBar?.me.allowedInviteRoles ?? []
   const roleAliases = buildRoleAliases({
       parent: parents,
       spouse: spouses,
@@ -309,7 +377,83 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
   })
 
   return (
-    <div className="flex flex-col items-center gap-12 min-h-[600px] py-10">
+    <div className="flex flex-col items-center gap-8 min-h-[600px] py-10">
+      {collabBar ? (
+        <>
+          <GraphCollaborationBar
+            data={{
+              graph: collabBar.graph,
+              me: collabBar.me,
+              members: collabBar.members,
+              pendingInvites: collabBar.pendingInvites,
+              reviewCount: (reviewSummary?.totalConflictFields ?? 0) + (reviewSummary?.totalOpenLinks ?? 0),
+            }}
+            onOpenActivity={() => setActivityOpen(true)}
+            onOpenInvite={() => setInviteOpen(true)}
+          />
+          <GraphActivityDrawer
+            open={activityOpen}
+            onClose={() => setActivityOpen(false)}
+            graphName={collabBar.graph.name}
+            items={collabBar.activity}
+            onOpenPerson={(personId) => {
+              setActivityOpen(false)
+              setCurrentPersonId(personId)
+              setHighlightedPersonId(personId)
+            }}
+          />
+          {inviteOpen && collabBar.me.canInvite ? (
+            <GraphInviteQuickModal
+              graphName={collabBar.graph.name}
+              allowedInviteRoles={collabBar.me.allowedInviteRoles}
+              onClose={() => setInviteOpen(false)}
+            />
+          ) : null}
+        </>
+      ) : null}
+      {!allowManage ? (
+        <div
+          className={`w-full max-w-5xl rounded-2xl border px-4 py-4 text-sm shadow-sm ${
+            allowEdit
+              ? 'border-amber-200 bg-amber-50 text-amber-900'
+              : 'border-sky-200 bg-sky-50 text-sky-900'
+          }`}
+        >
+          <div className="font-semibold">
+            {allowEdit ? 'Editing access is limited in this graph' : 'This graph is view-only for your account'}
+          </div>
+          <div className="mt-1 text-xs">
+            You are currently using this graph as an {activeRole}.{' '}
+            {allowEdit
+              ? canInvite
+                ? `You can update family members here and invite ${allowedInviteRoles.map((role) => role.toLowerCase()).join(' or ')} contributors, but only a graph admin can manage contributor roles.`
+                : 'You can update family members in this workspace, but only higher graph roles can invite contributors or manage permissions.'
+              : canInvite
+                ? `You can browse the family graph, review updates, and invite ${allowedInviteRoles.map((role) => role.toLowerCase()).join(' or ')} contributors from this workspace.`
+                : 'You can browse the family graph and review updates here, but editing people, inviting contributors, and graph management are restricted to higher roles.'}
+          </div>
+          {!allowManage ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link
+                href="/dashboard/review"
+                className={`rounded-lg px-3 py-2 text-xs font-medium ${
+                  allowEdit
+                    ? 'bg-amber-600 text-white hover:bg-amber-700'
+                    : 'bg-sky-600 text-white hover:bg-sky-700'
+                }`}
+              >
+                Open review inbox
+              </Link>
+              <Link
+                href="/dashboard/graph-management"
+                className="rounded-lg border border-current/20 bg-white/70 px-3 py-2 text-xs font-medium hover:bg-white"
+              >
+                Switch graph or view permissions
+              </Link>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <div className="w-full max-w-5xl">
         <div className="relative" ref={searchContainerRef}>
           <input
@@ -366,7 +510,9 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
           </Link>
         </div>
       ) : null}
-      
+
+      <div className="w-full overflow-x-auto pb-4">
+        <div className="mx-auto min-w-[900px] flex flex-col items-center gap-12 px-4">
       {/* --- Generation 1: Parents --- */}
       <div className="flex flex-col items-center relative">
         <h3 className="absolute -top-8 text-xs font-bold text-gray-400 tracking-wider uppercase">Parents</h3>
@@ -386,7 +532,6 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
              <AddButton onClick={() => handleAdd('PARENT')} label="Add Parent" small />
           )}
         </div>
-        {/* Connector Line Down */}
         {parents.length > 0 && <div className="h-12 w-0.5 bg-gray-300 mt-2"></div>}
       </div>
 
@@ -411,7 +556,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
       
         {/* Main Focus Group */}
         <div className="flex flex-col items-center relative z-10">
-            <div data-person-id={person.id} className={`flex items-center gap-6 p-6 rounded-2xl shadow-xl border ring-4 ${isPersonDeceased(person) ? 'bg-slate-50 border-slate-200 ring-slate-100' : 'bg-white border-indigo-50 ring-indigo-50/50'} ${highlightedPersonId === person.id ? 'ring-amber-200 border-amber-100 shadow-amber-100/40 shadow-xl' : ''}`}>
+            <div data-person-id={person.id} className={`flex flex-col items-center gap-4 p-4 rounded-2xl shadow-xl border ring-4 sm:flex-row sm:gap-6 sm:p-6 ${isPersonDeceased(person) ? 'bg-slate-50 border-slate-200 ring-slate-100' : 'bg-white border-indigo-50 ring-indigo-50/50'} ${highlightedPersonId === person.id ? 'ring-amber-200 border-amber-100 shadow-amber-100/40 shadow-xl' : ''}`}>
                 
                 {/* Focal Person */}
                 <div className="flex flex-col items-center group">
@@ -444,6 +589,9 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                           </span>
                         )}
                     </div>
+                    {getLatestPositionLabel(person) ? (
+                      <p className="mt-1 text-center text-xs font-medium text-slate-500">{getLatestPositionLabel(person)}</p>
+                    ) : null}
                     {person.nickName && <p className="text-xs text-gray-500 italic">&quot;{person.nickName}&quot;</p>}
                     <ReviewBadge person={person} />
                     
@@ -462,9 +610,17 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                     </div>
                     
                     <div className="flex gap-2 mt-4 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-200">
+                        <Link
+                            href={`/dashboard/person/${person.id}`}
+                            className="inline-flex items-center rounded-full px-3 py-2 text-sm text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                            title="Explore person"
+                        >
+                            Explore
+                        </Link>
                         {allowEdit ? (
                             <button
                                 onClick={() => handleEdit(person)}
+                                disabled={openingEditModal}
                                 className="p-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors"
                                 title="Edit Details"
                             >
@@ -563,6 +719,8 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
           </div> : null}
         </div>
       </div>
+        </div>
+      </div>
       
       {showAddModal && addRelationType && (
           <AddPersonModal 
@@ -622,7 +780,7 @@ function PersonCard({ person, onClick, onEdit, compact, displayNameMode = 'defau
             className={`
                 group cursor-pointer border rounded-xl transition-all duration-200 
                 flex flex-col items-center shadow-sm hover:shadow-md hover:border-indigo-300 hover:-translate-y-1 relative
-                ${compact ? 'p-2 w-24' : 'p-4 w-36'} 
+                ${compact ? 'p-2 w-20 sm:w-24' : 'p-3 w-28 sm:p-4 sm:w-36'} 
                 ${deceased ? 'bg-slate-50 border-slate-200' : 'bg-white border-gray-200'}
                 ${person.isDivorced ? 'opacity-70 border-dashed' : ''}
             `}
@@ -658,6 +816,11 @@ function PersonCard({ person, onClick, onEdit, compact, displayNameMode = 'defau
                 <span className="block truncate">{primaryName}</span>
             </div>
             {showSeparateLastName ? <div className="text-xs text-gray-500 truncate w-full text-center mt-0.5">{person.lastName}</div> : null}
+            {getLatestPositionLabel(person) ? (
+                <div className="mt-1 w-full truncate text-center text-[11px] text-slate-500">
+                    {getLatestPositionLabel(person)}
+                </div>
+            ) : null}
             {aliasRoles.length > 0 ? (
                 <div className="mt-1 rounded-full bg-amber-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
                     Also: {aliasRoles.join(', ')}
@@ -669,6 +832,13 @@ function PersonCard({ person, onClick, onEdit, compact, displayNameMode = 'defau
                 </div>
             ) : null}
             <ReviewBadge person={person} compact={compact} />
+            <Link
+                href={`/dashboard/person/${person.id}`}
+                onClick={(event) => event.stopPropagation()}
+                className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-indigo-600 hover:underline"
+            >
+                Explore
+            </Link>
             
             {person.isDivorced && <div className="text-[10px] text-red-400 font-bold uppercase mt-2 tracking-wide">Divorced</div>}
         </div>

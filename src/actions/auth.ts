@@ -6,16 +6,18 @@ import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { createPersonClaims, splitDisplayName, upsertUserPersonLink } from '@/lib/graph'
 import {
+  buildEmailVerificationLink,
   buildPasswordResetLink,
+  EMAIL_VERIFICATION_TTL_MS,
+  isEmailVerificationExpired,
   isPasswordResetExpired,
   normalizeEmailAddress,
   PASSWORD_RESET_TTL_MS,
   validatePasswordStrength,
 } from '@/lib/passwordSecurity'
 import bcrypt from 'bcryptjs'
-import { auth, signIn } from '@/auth'
+import { auth } from '@/auth'
 import { headers } from 'next/headers'
-import { AuthError } from 'next-auth'
 
 const RegisterSchema = z.object({
   email: z.string().email(),
@@ -55,6 +57,33 @@ async function getAppBaseUrl() {
   return 'http://localhost:3000'
 }
 
+async function createEmailVerificationSession(email: string, callbackUrl?: string | null) {
+  const normalizedEmail = normalizeEmailAddress(email)
+
+  await prisma.verificationToken.deleteMany({
+    where: { identifier: normalizedEmail },
+  })
+
+  const token = randomBytes(32).toString('hex')
+  const expires = new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS)
+
+  await prisma.verificationToken.create({
+    data: {
+      identifier: normalizedEmail,
+      token,
+      expires,
+    },
+  })
+
+  const baseUrl = await getAppBaseUrl()
+
+  return {
+    email: normalizedEmail,
+    verificationLink: buildEmailVerificationLink(baseUrl, token, callbackUrl),
+    expires,
+  }
+}
+
 export async function register(formData: FormData) {
   const validatedFields = RegisterSchema.safeParse({
     email: formData.get('email'),
@@ -66,7 +95,8 @@ export async function register(formData: FormData) {
     return { error: "Invalid fields" }
   }
 
-  const { email, password, name } = validatedFields.data
+  const email = normalizeEmailAddress(validatedFields.data.email)
+  const { password, name } = validatedFields.data
   const rawCallbackUrl = formData.get('callbackUrl')
   const callbackUrl =
     typeof rawCallbackUrl === 'string' && rawCallbackUrl.startsWith('/') ? rawCallbackUrl : '/dashboard'
@@ -143,23 +173,14 @@ export async function register(formData: FormData) {
     console.error(error)
     return { error: "Something went wrong during registration" }
   }
-  
-  try {
-    await signIn("credentials", {
-      email,
-      password,
-      redirectTo: callbackUrl,
-    })
-  } catch (error) {
-    if (error instanceof AuthError) {
-      switch (error.type) {
-        case "CredentialsSignin":
-          return { error: "Invalid credentials" }
-        default:
-          return { error: "Something went wrong" }
-      }
-    }
-    throw error
+
+  const verification = await createEmailVerificationSession(email, callbackUrl)
+
+  return {
+    success: true,
+    message: 'Account created. Verify your email address before recovering or changing your password.',
+    email: verification.email,
+    verificationLink: verification.verificationLink,
   }
 }
 
@@ -190,11 +211,15 @@ export async function changePassword(formData: FormData) {
 
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { id: true, password: true },
+    select: { id: true, password: true, emailVerified: true },
   })
 
   if (!user?.password) {
     return { error: 'Password sign-in is not enabled for this account.' }
+  }
+
+  if (!user.emailVerified) {
+    return { error: 'Verify your email address before changing your password.' }
   }
 
   const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password)
@@ -242,6 +267,7 @@ export async function requestPasswordReset(formData: FormData) {
     select: {
       id: true,
       email: true,
+      emailVerified: true,
       password: true,
     },
   })
@@ -250,6 +276,18 @@ export async function requestPasswordReset(formData: FormData) {
     return {
       success: true,
       message: 'If an account exists for that email, a reset link is now ready.',
+    }
+  }
+
+  if (!user.emailVerified) {
+    const verification = await createEmailVerificationSession(user.email)
+
+    return {
+      success: true,
+      verificationRequired: true as const,
+      message: 'Verify your email address before requesting a password reset link.',
+      email: verification.email,
+      verificationLink: verification.verificationLink,
     }
   }
 
@@ -283,6 +321,136 @@ export async function requestPasswordReset(formData: FormData) {
     message: 'Password reset link created.',
     email: user.email,
     resetLink,
+  }
+}
+
+export async function requestEmailVerification(formData: FormData) {
+  const session = await auth()
+  const submittedEmail = formData.get('email')
+  const rawCallbackUrl = formData.get('callbackUrl')
+  const callbackUrl =
+    typeof rawCallbackUrl === 'string' && rawCallbackUrl.startsWith('/') ? rawCallbackUrl : null
+
+  const normalizedEmail =
+    typeof submittedEmail === 'string' && submittedEmail.trim()
+      ? normalizeEmailAddress(submittedEmail)
+      : null
+
+  const user = normalizedEmail
+    ? await prisma.user.findUnique({
+        where: { email: normalizedEmail },
+        select: { id: true, email: true, emailVerified: true },
+      })
+    : session?.user?.id
+      ? await prisma.user.findUnique({
+          where: { id: session.user.id },
+          select: { id: true, email: true, emailVerified: true },
+        })
+      : null
+
+  if (!user?.email) {
+    return {
+      success: true,
+      message: 'If an account exists for that email, a verification link is now ready.',
+    }
+  }
+
+  if (user.emailVerified) {
+    return {
+      success: true,
+      alreadyVerified: true as const,
+      message: 'This email address is already verified.',
+      email: user.email,
+    }
+  }
+
+  const verification = await createEmailVerificationSession(user.email, callbackUrl)
+
+  return {
+    success: true,
+    message: 'Verification link created.',
+    email: verification.email,
+    verificationLink: verification.verificationLink,
+  }
+}
+
+export async function getEmailVerificationTokenState(token: string) {
+  const verificationToken = await prisma.verificationToken.findUnique({
+    where: { token },
+    select: {
+      identifier: true,
+      expires: true,
+    },
+  })
+
+  if (!verificationToken) {
+    return { valid: false as const, error: 'This verification link is invalid.' }
+  }
+
+  if (isEmailVerificationExpired(verificationToken.expires)) {
+    await prisma.verificationToken.deleteMany({
+      where: { token },
+    })
+    return { valid: false as const, error: 'This verification link has expired.' }
+  }
+
+  return {
+    valid: true as const,
+    email: verificationToken.identifier,
+    expiresAt: verificationToken.expires,
+  }
+}
+
+export async function verifyEmailToken(token: string) {
+  const verificationToken = await prisma.verificationToken.findUnique({
+    where: { token },
+    select: {
+      identifier: true,
+      expires: true,
+    },
+  })
+
+  if (!verificationToken) {
+    return { error: 'This verification link is invalid.' as const }
+  }
+
+  if (isEmailVerificationExpired(verificationToken.expires)) {
+    await prisma.verificationToken.deleteMany({
+      where: { token },
+    })
+    return { error: 'This verification link has expired.' as const }
+  }
+
+  const email = normalizeEmailAddress(verificationToken.identifier)
+  const user = await prisma.user.findUnique({
+    where: { email },
+    select: {
+      id: true,
+      emailVerified: true,
+    },
+  })
+
+  if (!user) {
+    await prisma.verificationToken.deleteMany({
+      where: { token },
+    })
+    return { error: 'No account was found for this verification link.' as const }
+  }
+
+  if (!user.emailVerified) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { emailVerified: new Date() },
+    })
+  }
+
+  await prisma.verificationToken.deleteMany({
+    where: { identifier: email },
+  })
+
+  return {
+    success: true as const,
+    email,
   }
 }
 
@@ -357,6 +525,15 @@ export async function resetPassword(formData: FormData) {
 
   if (isPasswordResetExpired(resetToken.expiresAt)) {
     return { error: 'This password reset link has expired.' }
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: resetToken.userId },
+    select: { emailVerified: true },
+  })
+
+  if (!user?.emailVerified) {
+    return { error: 'Verify your email address before resetting your password.' }
   }
 
   const hashedPassword = await bcrypt.hash(password, 10)

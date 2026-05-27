@@ -68,7 +68,7 @@ test('resolvePersonFromClaims overlays winning field values on legacy person', (
       id: 'p1',
       firstName: 'Legacy',
       lastName: 'Name',
-      dateOfBirth: null,
+      dateOfBirth: null as Date | string | null,
     },
     [
       {

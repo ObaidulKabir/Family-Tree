@@ -11,6 +11,7 @@ import {
   revokeGraphInvitation,
   updateGraphMembershipRole,
 } from '@/actions/graphManagement'
+import GraphSwitcher from '@/components/graph/GraphSwitcher'
 
 type PanelData = Awaited<ReturnType<typeof getGraphManagementPanelData>>
 export type GraphManagementPanelData = PanelData & { error: null }
@@ -36,7 +37,12 @@ function formatInvitationStatus(status: string, isExpired: boolean) {
   return 'bg-indigo-50 text-indigo-700'
 }
 
-export default function GraphManagementPanel({ initialData }: { initialData: GraphManagementPanelData }) {
+export default function GraphManagementPanel(props: {
+  initialData: GraphManagementPanelData
+  currentGraphId?: string | null
+  availableGraphs: Array<{ id: string; name: string; role: string }>
+}) {
+  const { initialData } = props
   const [data, setData] = useState(initialData)
   const [graphName, setGraphName] = useState(initialData.graph.name)
   const [inviteEmail, setInviteEmail] = useState('')
@@ -138,7 +144,11 @@ export default function GraphManagementPanel({ initialData }: { initialData: Gra
               Manage contributors, invitations, permissions, collaboration status, and audit history for this family graph.
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="flex flex-col gap-4">
+            <div className="flex justify-start lg:justify-end">
+              <GraphSwitcher currentGraphId={props.currentGraphId} graphs={props.availableGraphs} />
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
               <div className="text-xs uppercase tracking-wide text-slate-500">People</div>
               <div className="mt-1 text-2xl font-semibold text-slate-900">{data.graph.counts.people}</div>
@@ -154,6 +164,7 @@ export default function GraphManagementPanel({ initialData }: { initialData: Gra
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
               <div className="text-xs uppercase tracking-wide text-slate-500">Pending invites</div>
               <div className="mt-1 text-2xl font-semibold text-slate-900">{data.invitations.filter((invitation) => invitation.status === 'PENDING' && !invitation.isExpired).length}</div>
+            </div>
             </div>
           </div>
         </div>

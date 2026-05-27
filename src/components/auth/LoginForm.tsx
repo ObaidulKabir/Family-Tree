@@ -6,11 +6,12 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
 export default function LoginForm() {
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const router = useRouter();
   const searchParams = useSearchParams();
+  const prefilledEmail = searchParams.get('email') ?? '';
+  const [email, setEmail] = useState(prefilledEmail);
   const rawCallbackUrl = searchParams.get('callbackUrl');
   const callbackUrl = rawCallbackUrl && rawCallbackUrl.startsWith('/') ? rawCallbackUrl : '/dashboard';
 
@@ -74,6 +75,9 @@ export default function LoginForm() {
           <Link href="/forgot-password" className="text-sm text-indigo-600 hover:underline">Forgot password?</Link>
         </div>
         <p className="text-sm">Don&apos;t have an account? <Link href={callbackUrl !== '/dashboard' ? `/register?callbackUrl=${encodeURIComponent(callbackUrl)}` : '/register'} className="text-indigo-600 hover:underline">Register</Link></p>
+        {prefilledEmail ? (
+          <p className="text-xs text-slate-500">Use {prefilledEmail} to accept the invitation.</p>
+        ) : null}
       </div>
     </div>
   );

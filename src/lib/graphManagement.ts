@@ -6,6 +6,12 @@ const GRAPH_ROLE_PRIORITY = {
 } as const
 
 export type GraphRole = keyof typeof GRAPH_ROLE_PRIORITY
+const GRAPH_INVITE_ROLE_MAP: Record<GraphRole, GraphRole[]> = {
+  VIEWER: ['VIEWER'],
+  COMMENTER: ['VIEWER'],
+  EDITOR: ['EDITOR', 'VIEWER'],
+  ADMIN: ['EDITOR', 'COMMENTER', 'VIEWER'],
+}
 
 export function canViewGraph(role?: string | null) {
   return typeof role === 'string' && role in GRAPH_ROLE_PRIORITY
@@ -17,6 +23,20 @@ export function canEditGraph(role?: string | null) {
 
 export function canManageGraph(role?: string | null) {
   return role === 'ADMIN'
+}
+
+export function getAllowedInviteRoles(role?: string | null) {
+  if (typeof role !== 'string' || !(role in GRAPH_INVITE_ROLE_MAP)) return [] as GraphRole[]
+  return GRAPH_INVITE_ROLE_MAP[role as GraphRole]
+}
+
+export function canInviteGraph(role?: string | null) {
+  return getAllowedInviteRoles(role).length > 0
+}
+
+export function canInviteGraphRole(role?: string | null, targetRole?: string | null) {
+  if (typeof targetRole !== 'string') return false
+  return getAllowedInviteRoles(role).includes(targetRole as GraphRole)
 }
 
 export function isGraphInvitationExpired(expiresAt: Date, now = new Date()) {

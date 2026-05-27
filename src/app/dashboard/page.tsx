@@ -5,8 +5,9 @@ import FamilyTreeView from '@/components/family/FamilyTreeView';
 import { prisma } from '@/lib/prisma';
 import { createPersonClaims, splitDisplayName, upsertUserPersonLink } from '@/lib/graph';
 import { canManageGraph } from '@/lib/graphManagement';
-import { getCurrentGraphContext } from '@/actions/graphManagement';
+import { getAvailableGraphsForSession, getCurrentGraphContext } from '@/actions/graphManagement';
 import { SignOut } from '@/components/auth/SignOut';
+import GraphSwitcher from '@/components/graph/GraphSwitcher';
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -82,19 +83,23 @@ export default async function DashboardPage() {
   }
 
   const graphContext = await getCurrentGraphContext(user.id, displayName, rootPersonId)
+  const availableGraphsResult = await getAvailableGraphsForSession()
   const initialPersonId = graphContext.rootPersonId ?? rootPersonId
   const canManageCurrentGraph = canManageGraph(graphContext.role)
+  const availableGraphs = !availableGraphsResult.error ? (availableGraphsResult.graphs ?? []) : []
+  const currentGraphId = !availableGraphsResult.error ? availableGraphsResult.currentGraphId : graphContext.graphId
 
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-50">
-        <div className="container mx-auto px-6 py-4 flex justify-between items-center">
+        <div className="container mx-auto px-4 py-4 flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
             <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-serif font-bold text-lg">F</div>
                 <h1 className="text-xl font-serif font-bold text-gray-800">FamilyExplorer</h1>
             </div>
             
-            <div className="flex items-center gap-6">
+            <div className="flex flex-wrap items-center justify-start gap-4 sm:justify-end">
+               <GraphSwitcher currentGraphId={currentGraphId} graphs={availableGraphs} />
                <Link href="/dashboard/review" className="text-sm text-indigo-600 font-medium hover:text-indigo-700">
                  Review updates
                </Link>
@@ -118,7 +123,7 @@ export default async function DashboardPage() {
       </header>
       
       <main className="container mx-auto px-4 py-8">
-         <FamilyTreeView initialPersonId={initialPersonId} />
+         <FamilyTreeView key={graphContext.graphId ?? initialPersonId} initialPersonId={initialPersonId} />
       </main>
     </div>
   );

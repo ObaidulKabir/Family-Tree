@@ -1,4 +1,5 @@
 import { auth } from '@/auth'
+import { requireGraphPermissionForPerson } from '@/actions/graphManagement'
 import { prisma } from '@/lib/prisma'
 import { getImageExtension, validateImageUpload } from '@/lib/upload'
 
@@ -22,6 +23,13 @@ export async function POST(request: Request) {
 
   if (typeof personId !== 'string' || !personId) {
     return Response.json({ error: 'Missing person id.' }, { status: 400 })
+  }
+
+  try {
+    await requireGraphPermissionForPerson(prisma, session.user.id, personId, 'edit')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Forbidden'
+    return Response.json({ error: message }, { status: message === 'Forbidden' ? 403 : 400 })
   }
 
   const validation = validateImageUpload({
@@ -88,4 +96,3 @@ export async function POST(request: Request) {
 
   return Response.json({ success: true, ...photo })
 }
-

@@ -3,12 +3,22 @@ import { redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
 import ChangePasswordForm from '@/components/auth/ChangePasswordForm'
+import EmailVerificationPanel from '@/components/auth/EmailVerificationPanel'
+import { prisma } from '@/lib/prisma'
 
 export default async function SettingsPage() {
   const session = await auth()
-  if (!session?.user) {
+  if (!session?.user?.id) {
     redirect('/login?callbackUrl=/dashboard/settings')
   }
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: {
+      email: true,
+      emailVerified: true,
+    },
+  })
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-8">
@@ -23,7 +33,8 @@ export default async function SettingsPage() {
           </Link>
         </div>
 
-        <ChangePasswordForm />
+        <EmailVerificationPanel email={user?.email} isVerified={Boolean(user?.emailVerified)} />
+        <ChangePasswordForm isEmailVerified={Boolean(user?.emailVerified)} />
       </div>
     </div>
   )

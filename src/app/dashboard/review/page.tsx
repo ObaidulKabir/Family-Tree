@@ -3,7 +3,9 @@ import { redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
 import { getPersonDetails } from '@/actions/family'
+import { getAvailableGraphsForSession, getCurrentGraphContext } from '@/actions/graphManagement'
 import { resolvePersonFieldConflict, resolvePersonLinkDecision } from '@/actions/review'
+import GraphSwitcher from '@/components/graph/GraphSwitcher'
 import { prisma } from '@/lib/prisma'
 import { getFieldConflictDetails, groupClaimsByPerson } from '@/lib/resolution'
 
@@ -33,14 +35,24 @@ export default async function DashboardReviewPage() {
 
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { rootPersonId: true },
+    select: { id: true, name: true, rootPersonId: true },
   })
 
-  if (!user?.rootPersonId) {
+  if (!user?.id || !user.rootPersonId) {
     redirect('/login')
   }
 
-  const result = await getPersonDetails(user.rootPersonId)
+  const graphContext = await getCurrentGraphContext(
+    user.id,
+    user.name ?? session.user.name ?? 'User',
+    user.rootPersonId
+  )
+  const availableGraphsResult = await getAvailableGraphsForSession()
+  const currentGraphId = !availableGraphsResult.error ? availableGraphsResult.currentGraphId : graphContext.graphId
+  const availableGraphs = !availableGraphsResult.error ? (availableGraphsResult.graphs ?? []) : []
+  const activeGraph = availableGraphs.find((graph) => graph.id === currentGraphId)
+
+  const result = await getPersonDetails(graphContext.rootPersonId ?? user.rootPersonId)
   if ('error' in result) {
     return <div className="p-8 text-red-500">{result.error}</div>
   }
@@ -89,16 +101,24 @@ export default async function DashboardReviewPage() {
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="container mx-auto max-w-4xl px-4 py-10">
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
             <h1 className="text-3xl font-serif font-bold text-gray-900">Review family updates</h1>
             <p className="mt-2 text-sm text-gray-600">
               Resolve suggested changes and linked profiles without interrupting your tree work.
             </p>
+            {activeGraph ? (
+              <div className="mt-3 inline-flex rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-indigo-700">
+                {activeGraph.name} • {activeGraph.role.toLowerCase()}
+              </div>
+            ) : null}
           </div>
-          <Link href="/dashboard" className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-white">
-            Back to tree
-          </Link>
+          <div className="flex flex-col items-stretch gap-3 md:items-end">
+            <GraphSwitcher currentGraphId={currentGraphId} graphs={availableGraphs} />
+            <Link href="/dashboard" className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-white">
+              Back to tree
+            </Link>
+          </div>
         </div>
 
         <div className="mt-8 space-y-4">
