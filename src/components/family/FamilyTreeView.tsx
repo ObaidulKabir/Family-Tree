@@ -366,9 +366,13 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
   const reviewSummary = data.reviewSummary;
   const allowEdit = Boolean(data.graphPermission?.canEdit);
   const allowManage = Boolean(data.graphPermission?.canManage);
-  const activeRole = collabBar?.me.role?.toLowerCase() ?? 'member'
+  const activeRole = collabBar?.me.role?.toLowerCase() ?? data.graphPermission?.role?.toLowerCase() ?? 'member'
   const normalizedGraphRole =
-    typeof collabBar?.me.role === 'string' ? collabBar.me.role.trim().toUpperCase() : ''
+    typeof collabBar?.me.role === 'string'
+      ? collabBar.me.role.trim().toUpperCase()
+      : typeof data.graphPermission?.role === 'string'
+        ? data.graphPermission.role.trim().toUpperCase()
+        : ''
   const derivedInviteRoles =
     normalizedGraphRole === 'ADMIN' || normalizedGraphRole === 'OWNER'
       ? ['EDITOR', 'COMMENTER', 'VIEWER']
@@ -391,18 +395,19 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
 
   return (
     <div className="flex flex-col items-center gap-8 min-h-[600px] py-10">
-      {collabBar ? (
+      {data.graphPermission?.graphId ? (
         <>
           <GraphCollaborationBar
             data={{
-              graph: collabBar.graph,
+              graph: collabBar?.graph ?? { id: data.graphPermission.graphId, name: 'Family graph' },
               me: {
-                ...collabBar.me,
+                role: collabBar?.me.role ?? data.graphPermission.role ?? 'VIEWER',
+                canManage: collabBar?.me.canManage ?? allowManage,
                 canInvite,
                 allowedInviteRoles,
               },
-              members: collabBar.members,
-              pendingInvites: collabBar.pendingInvites,
+              members: collabBar?.members ?? [],
+              pendingInvites: collabBar?.pendingInvites ?? 0,
               reviewCount: (reviewSummary?.totalConflictFields ?? 0) + (reviewSummary?.totalOpenLinks ?? 0),
             }}
             onOpenActivity={() => setActivityOpen(true)}
@@ -411,8 +416,8 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
           <GraphActivityDrawer
             open={activityOpen}
             onClose={() => setActivityOpen(false)}
-            graphName={collabBar.graph.name}
-            items={collabBar.activity}
+            graphName={collabBar?.graph.name ?? 'Family graph'}
+            items={collabBar?.activity ?? []}
             onOpenPerson={(personId) => {
               setActivityOpen(false)
               setCurrentPersonId(personId)
@@ -421,7 +426,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
           />
           {inviteOpen && canInvite ? (
             <GraphInviteQuickModal
-              graphName={collabBar.graph.name}
+              graphName={collabBar?.graph.name ?? 'Family graph'}
               allowedInviteRoles={allowedInviteRoles}
               onClose={() => setInviteOpen(false)}
             />
