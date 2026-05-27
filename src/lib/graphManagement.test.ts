@@ -4,8 +4,11 @@ import test from 'node:test'
 import {
   buildGraphAuditDetails,
   canEditGraph,
+  canInviteGraph,
+  canInviteGraphRole,
   canManageGraph,
   canViewGraph,
+  getAllowedInviteRoles,
   getContributorPresence,
   isGraphInvitationExpired,
   validateOptimisticConcurrency,
@@ -17,6 +20,21 @@ test('graph roles expose view/edit/manage capabilities correctly', () => {
   assert.equal(canManageGraph('ADMIN'), true)
   assert.equal(canEditGraph('VIEWER'), false)
   assert.equal(canManageGraph('EDITOR'), false)
+})
+
+test('graph roles expose invite capabilities correctly', () => {
+  assert.equal(canInviteGraph('ADMIN'), true)
+  assert.equal(canInviteGraph('EDITOR'), true)
+  assert.equal(canInviteGraph('VIEWER'), true)
+  assert.deepEqual(getAllowedInviteRoles('ADMIN'), ['EDITOR', 'COMMENTER', 'VIEWER'])
+  assert.deepEqual(getAllowedInviteRoles('EDITOR'), ['EDITOR', 'VIEWER'])
+  assert.deepEqual(getAllowedInviteRoles('COMMENTER'), ['VIEWER'])
+  assert.deepEqual(getAllowedInviteRoles('VIEWER'), ['VIEWER'])
+  assert.equal(canInviteGraphRole('EDITOR', 'EDITOR'), true)
+  assert.equal(canInviteGraphRole('EDITOR', 'VIEWER'), true)
+  assert.equal(canInviteGraphRole('EDITOR', 'COMMENTER'), false)
+  assert.equal(canInviteGraphRole('VIEWER', 'VIEWER'), true)
+  assert.equal(canInviteGraphRole('VIEWER', 'EDITOR'), false)
 })
 
 test('expired graph invitations are detected from expiry time', () => {

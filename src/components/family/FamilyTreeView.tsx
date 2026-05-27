@@ -79,7 +79,7 @@ type FamilyTreeData = {
 
 type CollaborationBarState = {
   graph: { id: string; name: string };
-  me: { role: string; canManage: boolean };
+  me: { role: string; canManage: boolean; canInvite: boolean; allowedInviteRoles: string[] };
   members: Array<{ id: string; name?: string | null; email?: string | null; role: string; presence: 'online' | 'away' | 'offline' }>;
   pendingInvites: number;
   activity: Array<{ id: string; createdAt: string; action: string; entityType: string; entityId?: string | null; actor?: { id: string; name?: string | null; email?: string | null } | null }>;
@@ -367,6 +367,8 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
   const allowEdit = Boolean(data.graphPermission?.canEdit);
   const allowManage = Boolean(data.graphPermission?.canManage);
   const activeRole = collabBar?.me.role?.toLowerCase() ?? 'member'
+  const canInvite = Boolean(collabBar?.me.canInvite)
+  const allowedInviteRoles = collabBar?.me.allowedInviteRoles ?? []
   const roleAliases = buildRoleAliases({
       parent: parents,
       spouse: spouses,
@@ -400,9 +402,10 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
               setHighlightedPersonId(personId)
             }}
           />
-          {inviteOpen && collabBar.me.canManage ? (
+          {inviteOpen && collabBar.me.canInvite ? (
             <GraphInviteQuickModal
               graphName={collabBar.graph.name}
+              allowedInviteRoles={collabBar.me.allowedInviteRoles}
               onClose={() => setInviteOpen(false)}
             />
           ) : null}
@@ -422,8 +425,12 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
           <div className="mt-1 text-xs">
             You are currently using this graph as an {activeRole}.{' '}
             {allowEdit
-              ? 'You can update family members in this workspace, but only a graph admin can invite contributors or manage permissions.'
-              : 'You can browse the family graph and review updates here, but editing people, inviting contributors, and graph management are restricted to higher roles.'}
+              ? canInvite
+                ? `You can update family members here and invite ${allowedInviteRoles.map((role) => role.toLowerCase()).join(' or ')} contributors, but only a graph admin can manage contributor roles.`
+                : 'You can update family members in this workspace, but only higher graph roles can invite contributors or manage permissions.'
+              : canInvite
+                ? `You can browse the family graph, review updates, and invite ${allowedInviteRoles.map((role) => role.toLowerCase()).join(' or ')} contributors from this workspace.`
+                : 'You can browse the family graph and review updates here, but editing people, inviting contributors, and graph management are restricted to higher roles.'}
           </div>
           {!allowManage ? (
             <div className="mt-3 flex flex-wrap gap-2">

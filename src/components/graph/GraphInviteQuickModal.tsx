@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { Check, Copy, X } from 'lucide-react'
 
@@ -8,14 +8,23 @@ import { createGraphInvitation } from '@/actions/graphManagement'
 
 export default function GraphInviteQuickModal(props: {
   graphName: string
+  allowedInviteRoles: string[]
   onClose: () => void
 }) {
+  const availableRoles = useMemo(
+    () => (props.allowedInviteRoles.length > 0 ? props.allowedInviteRoles : ['VIEWER']),
+    [props.allowedInviteRoles]
+  )
   const [email, setEmail] = useState('')
-  const [role, setRole] = useState('EDITOR')
+  const [role, setRole] = useState(availableRoles[0])
   const [inviteLink, setInviteLink] = useState('')
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setRole(availableRoles[0])
+  }, [availableRoles])
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -57,6 +66,9 @@ export default function GraphInviteQuickModal(props: {
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Invite collaborators</div>
             <div className="mt-1 text-lg font-semibold text-slate-900">{props.graphName}</div>
             <div className="mt-1 text-sm text-slate-600">Create a secure invitation link to share.</div>
+            <div className="mt-2 text-xs text-slate-500">
+              Allowed roles: {availableRoles.map((item) => item.toLowerCase()).join(', ')}
+            </div>
           </div>
           <button onClick={props.onClose} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Close">
             <X size={18} />
@@ -84,9 +96,11 @@ export default function GraphInviteQuickModal(props: {
                   value={role}
                   onChange={(e) => setRole(e.target.value)}
                 >
-                  <option value="EDITOR">Editor</option>
-                  <option value="COMMENTER">Commenter</option>
-                  <option value="VIEWER">Viewer</option>
+                  {availableRoles.map((allowedRole) => (
+                    <option key={allowedRole} value={allowedRole}>
+                      {allowedRole.charAt(0)}{allowedRole.slice(1).toLowerCase()}
+                    </option>
+                  ))}
                 </select>
               </div>
               <button

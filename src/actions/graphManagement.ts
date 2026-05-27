@@ -8,7 +8,10 @@ import { auth } from '@/auth'
 import { prisma } from '@/lib/prisma'
 import {
   buildGraphAuditDetails,
+  canInviteGraph,
+  canInviteGraphRole,
   canManageGraph,
+  getAllowedInviteRoles,
   getContributorPresence,
   isGraphInvitationExpired,
 } from '@/lib/graphManagement'
@@ -730,6 +733,8 @@ export async function getGraphCollaborationBarData(graphId: string) {
       me: {
         role: membership.role,
         canManage: canManageGraph(membership.role),
+        canInvite: canInviteGraph(membership.role),
+        allowedInviteRoles: getAllowedInviteRoles(membership.role),
       },
       members: members.map((member) => ({
         id: member.user.id,
@@ -797,7 +802,18 @@ export async function createGraphInvitation(email: string, role: string) {
   }
 
   try {
-    const graph = await getAdminGraphForSession(userId)
+    const graph = await getActiveGraphForSession(userId)
+    if (!canInviteGraph(graph.role)) {
+      return { error: 'You do not have permission to invite contributors to the active graph.' as const }
+    }
+    if (!canInviteGraphRole(graph.role, normalizedRole)) {
+      return {
+        error:
+          graph.role === 'EDITOR'
+            ? 'Editors can only invite editors or viewers.'
+            : 'Your current graph role only allows viewer invitations.',
+      }
+    }
     const token = randomBytes(32).toString('hex')
     const tokenHash = createHash('sha256').update(token).digest('hex')
     const invitedUser = await prisma.user.findFirst({

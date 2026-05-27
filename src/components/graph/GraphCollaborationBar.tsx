@@ -14,7 +14,7 @@ export type GraphPresenceMember = {
 
 export type GraphCollaborationBarData = {
   graph: { id: string; name: string }
-  me: { role: string; canManage: boolean }
+  me: { role: string; canManage: boolean; canInvite: boolean; allowedInviteRoles: string[] }
   members: GraphPresenceMember[]
   pendingInvites: number
   reviewCount?: number
@@ -63,7 +63,7 @@ export default function GraphCollaborationBar(props: {
               {props.data.members.length} collaborators
             </span>
             <span>• Workspace permissions follow this selected graph</span>
-            {props.data.me.canManage ? (
+            {props.data.me.canInvite ? (
               <span>• {props.data.pendingInvites} pending invites</span>
             ) : null}
           </div>
@@ -90,7 +90,7 @@ export default function GraphCollaborationBar(props: {
             <Activity size={16} />
             Activity
           </button>
-          {props.data.me.canManage ? (
+          {props.data.me.canInvite ? (
             props.onOpenInvite ? (
               <button
                 type="button"
