@@ -4,7 +4,7 @@ import { useState } from 'react'
 
 import { changePassword } from '@/actions/auth'
 
-export default function ChangePasswordForm() {
+export default function ChangePasswordForm({ isEmailVerified = true }: { isEmailVerified?: boolean }) {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -45,11 +45,20 @@ export default function ChangePasswordForm() {
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <div>
         <h2 className="text-lg font-semibold text-slate-900">Change password</h2>
-        <p className="mt-1 text-sm text-slate-500">Update your password while signed in.</p>
+        <p className="mt-1 text-sm text-slate-500">
+          {isEmailVerified
+            ? 'Update your password while signed in.'
+            : 'Verify your email address first to unlock password changes.'}
+        </p>
       </div>
 
       {error ? <div className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
       {success ? <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</div> : null}
+      {!isEmailVerified ? (
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          Email verification is required before you can change your password.
+        </div>
+      ) : null}
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
         <div>
@@ -58,6 +67,7 @@ export default function ChangePasswordForm() {
             type="password"
             value={currentPassword}
             onChange={(event) => setCurrentPassword(event.target.value)}
+            disabled={!isEmailVerified}
             required
             className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring focus:ring-indigo-200"
           />
@@ -68,6 +78,7 @@ export default function ChangePasswordForm() {
             type="password"
             value={newPassword}
             onChange={(event) => setNewPassword(event.target.value)}
+            disabled={!isEmailVerified}
             required
             className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring focus:ring-indigo-200"
           />
@@ -78,13 +89,14 @@ export default function ChangePasswordForm() {
             type="password"
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.target.value)}
+            disabled={!isEmailVerified}
             required
             className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring focus:ring-indigo-200"
           />
         </div>
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || !isEmailVerified}
           className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
         >
           {loading ? 'Saving...' : 'Change password'}

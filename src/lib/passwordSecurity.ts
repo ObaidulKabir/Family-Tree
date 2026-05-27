@@ -1,5 +1,6 @@
 export const PASSWORD_MIN_LENGTH = 8
 export const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000
+export const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000
 
 export function normalizeEmailAddress(email: string) {
   return email.trim().toLowerCase()
@@ -21,7 +22,19 @@ export function isPasswordResetExpired(expiresAt: Date, now = new Date()) {
   return expiresAt.getTime() <= now.getTime()
 }
 
+export function isEmailVerificationExpired(expiresAt: Date, now = new Date()) {
+  return expiresAt.getTime() <= now.getTime()
+}
+
 export function buildPasswordResetLink(baseUrl: string, token: string) {
   return `${baseUrl.replace(/\/$/, '')}/reset-password/${token}`
+}
+
+export function buildEmailVerificationLink(baseUrl: string, token: string, callbackUrl?: string | null) {
+  const url = new URL(`/verify-email/${token}`, `${baseUrl.replace(/\/$/, '')}/`)
+  if (callbackUrl && callbackUrl.startsWith('/')) {
+    url.searchParams.set('callbackUrl', callbackUrl)
+  }
+  return url.toString()
 }
 

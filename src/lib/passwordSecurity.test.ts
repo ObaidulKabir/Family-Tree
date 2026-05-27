@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  buildEmailVerificationLink,
   buildPasswordResetLink,
+  isEmailVerificationExpired,
   isPasswordResetExpired,
   normalizeEmailAddress,
   validatePasswordStrength,
@@ -35,10 +37,23 @@ test('isPasswordResetExpired compares the expiry timestamp', () => {
   assert.equal(isPasswordResetExpired(new Date('2026-04-03T12:30:00.000Z'), now), false)
 })
 
+test('isEmailVerificationExpired compares the expiry timestamp', () => {
+  const now = new Date('2026-04-03T12:00:00.000Z')
+  assert.equal(isEmailVerificationExpired(new Date('2026-04-03T11:59:59.000Z'), now), true)
+  assert.equal(isEmailVerificationExpired(new Date('2026-04-03T12:30:00.000Z'), now), false)
+})
+
 test('buildPasswordResetLink creates a reset-password route URL', () => {
   assert.equal(
     buildPasswordResetLink('http://localhost:3000/', 'token-123'),
     'http://localhost:3000/reset-password/token-123'
+  )
+})
+
+test('buildEmailVerificationLink creates a verify-email route URL with optional callback', () => {
+  assert.equal(
+    buildEmailVerificationLink('http://localhost:3000/', 'token-123', '/invite/graph/abc'),
+    'http://localhost:3000/verify-email/token-123?callbackUrl=%2Finvite%2Fgraph%2Fabc'
   )
 })
 

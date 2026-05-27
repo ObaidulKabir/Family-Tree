@@ -9,11 +9,16 @@ function buildMailtoHref(email: string, resetLink: string) {
   return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent('Your password reset link')}&body=${encodeURIComponent(`Use this secure link to reset your password:\n\n${resetLink}`)}`
 }
 
+function buildVerificationMailtoHref(email: string, verificationLink: string) {
+  return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent('Verify your FamilyExplorer account')}&body=${encodeURIComponent(`Open this secure link to verify your email address:\n\n${verificationLink}`)}`
+}
+
 export default function ForgotPasswordForm() {
   const [email, setEmail] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [resetLink, setResetLink] = useState('')
+  const [verificationLink, setVerificationLink] = useState('')
   const [deliveryEmail, setDeliveryEmail] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -23,6 +28,7 @@ export default function ForgotPasswordForm() {
     setError('')
     setMessage('')
     setResetLink('')
+    setVerificationLink('')
     setDeliveryEmail('')
 
     try {
@@ -38,6 +44,9 @@ export default function ForgotPasswordForm() {
       setMessage(result.message ?? 'If an account exists for that email, a reset link is now ready.')
       if ('resetLink' in result && result.resetLink) {
         setResetLink(result.resetLink)
+      }
+      if ('verificationLink' in result && result.verificationLink) {
+        setVerificationLink(result.verificationLink)
       }
       if ('email' in result && result.email) {
         setDeliveryEmail(result.email)
@@ -95,6 +104,29 @@ export default function ForgotPasswordForm() {
               <a
                 href={buildMailtoHref(deliveryEmail, resetLink)}
                 className="rounded-lg border border-indigo-300 px-3 py-2 text-xs font-medium text-indigo-700 hover:bg-white"
+              >
+                Email link
+              </a>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      {verificationLink ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <div className="text-sm font-medium text-amber-900">Verify email first</div>
+          <div className="mt-2 break-all text-xs text-amber-700">{verificationLink}</div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => navigator.clipboard.writeText(verificationLink)}
+              className="rounded-lg border border-amber-300 px-3 py-2 text-xs font-medium text-amber-700 hover:bg-white"
+              type="button"
+            >
+              Copy link
+            </button>
+            {deliveryEmail ? (
+              <a
+                href={buildVerificationMailtoHref(deliveryEmail, verificationLink)}
+                className="rounded-lg border border-amber-300 px-3 py-2 text-xs font-medium text-amber-700 hover:bg-white"
               >
                 Email link
               </a>
