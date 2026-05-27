@@ -3,6 +3,7 @@ const GRAPH_ROLE_PRIORITY = {
   COMMENTER: 1,
   EDITOR: 2,
   ADMIN: 3,
+  OWNER: 3,
 } as const
 
 export type GraphRole = keyof typeof GRAPH_ROLE_PRIORITY
@@ -11,6 +12,7 @@ const GRAPH_INVITE_ROLE_MAP: Record<GraphRole, GraphRole[]> = {
   COMMENTER: ['VIEWER'],
   EDITOR: ['EDITOR', 'VIEWER'],
   ADMIN: ['EDITOR', 'COMMENTER', 'VIEWER'],
+  OWNER: ['EDITOR', 'COMMENTER', 'VIEWER'],
 }
 
 export function canViewGraph(role?: string | null) {
@@ -22,7 +24,7 @@ export function canEditGraph(role?: string | null) {
 }
 
 export function canManageGraph(role?: string | null) {
-  return role === 'ADMIN'
+  return role === 'ADMIN' || role === 'OWNER'
 }
 
 export function getAllowedInviteRoles(role?: string | null) {

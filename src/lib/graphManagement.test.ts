@@ -18,15 +18,18 @@ test('graph roles expose view/edit/manage capabilities correctly', () => {
   assert.equal(canViewGraph('VIEWER'), true)
   assert.equal(canEditGraph('EDITOR'), true)
   assert.equal(canManageGraph('ADMIN'), true)
+  assert.equal(canManageGraph('OWNER'), true)
   assert.equal(canEditGraph('VIEWER'), false)
   assert.equal(canManageGraph('EDITOR'), false)
 })
 
 test('graph roles expose invite capabilities correctly', () => {
   assert.equal(canInviteGraph('ADMIN'), true)
+  assert.equal(canInviteGraph('OWNER'), true)
   assert.equal(canInviteGraph('EDITOR'), true)
   assert.equal(canInviteGraph('VIEWER'), true)
   assert.deepEqual(getAllowedInviteRoles('ADMIN'), ['EDITOR', 'COMMENTER', 'VIEWER'])
+  assert.deepEqual(getAllowedInviteRoles('OWNER'), ['EDITOR', 'COMMENTER', 'VIEWER'])
   assert.deepEqual(getAllowedInviteRoles('EDITOR'), ['EDITOR', 'VIEWER'])
   assert.deepEqual(getAllowedInviteRoles('COMMENTER'), ['VIEWER'])
   assert.deepEqual(getAllowedInviteRoles('VIEWER'), ['VIEWER'])
