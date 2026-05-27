@@ -10,16 +10,16 @@ export default async function Home() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen py-2">
-      <main className="flex flex-col items-center justify-center w-full flex-1 px-20 text-center">
-        <h1 className="text-6xl font-bold">
-          Welcome to <span className="text-blue-600">Family Tree App</span>
+      <main className="flex flex-col items-center justify-center w-full flex-1 px-4 text-center sm:px-10 lg:px-20">
+        <h1 className="text-4xl font-bold sm:text-5xl lg:text-6xl">
+          Welcome to <span className="text-blue-600">Familly Explorer</span>
         </h1>
 
-        <p className="mt-3 text-2xl">
+        <p className="mt-3 text-lg sm:text-xl lg:text-2xl">
           Build and manage your family history with ease.
         </p>
 
-        <div className="flex mt-6 gap-4">
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:gap-4">
           <Link
             href="/login"
             className="px-6 py-3 text-white bg-blue-600 rounded-md hover:bg-blue-700 text-lg font-medium"
