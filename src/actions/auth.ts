@@ -15,6 +15,7 @@ import {
   PASSWORD_RESET_TTL_MS,
   validatePasswordStrength,
 } from '@/lib/passwordSecurity'
+import { sendEmail } from '@/lib/email'
 import bcrypt from 'bcryptjs'
 import { auth } from '@/auth'
 import { headers } from 'next/headers'
@@ -275,19 +276,27 @@ export async function requestPasswordReset(formData: FormData) {
   if (!user?.email || !user.password) {
     return {
       success: true,
-      message: 'If an account exists for that email, a reset link is now ready.',
+      message: 'If an account exists for that email, a password reset email has been sent.',
     }
   }
 
   if (!user.emailVerified) {
     const verification = await createEmailVerificationSession(user.email)
+    const verificationDelivery = await sendEmail({
+      to: verification.email,
+      subject: 'Verify your FamilyExplorer account',
+      text: `Open this secure link to verify your email address:\n\n${verification.verificationLink}\n\nIf you did not request this, you can ignore this email.`,
+      html: `<p>Open this secure link to verify your email address:</p><p><a href="${verification.verificationLink}">${verification.verificationLink}</a></p><p>If you did not request this, you can ignore this email.</p>`,
+    })
+
+    if (!verificationDelivery.ok) {
+      return { error: verificationDelivery.error }
+    }
 
     return {
       success: true,
       verificationRequired: true as const,
-      message: 'Verify your email address before requesting a password reset link.',
-      email: verification.email,
-      verificationLink: verification.verificationLink,
+      message: 'Verify your email address before resetting your password. We sent a verification email to your inbox.',
     }
   }
 
@@ -316,11 +325,20 @@ export async function requestPasswordReset(formData: FormData) {
   const baseUrl = await getAppBaseUrl()
   const resetLink = buildPasswordResetLink(baseUrl, token)
 
+  const delivery = await sendEmail({
+    to: user.email,
+    subject: 'Reset your FamilyExplorer password',
+    text: `Use this secure link to reset your password:\n\n${resetLink}\n\nThis link expires in 60 minutes.\n\nIf you did not request this, you can ignore this email.`,
+    html: `<p>Use this secure link to reset your password:</p><p><a href="${resetLink}">${resetLink}</a></p><p>This link expires in 60 minutes.</p><p>If you did not request this, you can ignore this email.</p>`,
+  })
+
+  if (!delivery.ok) {
+    return { error: delivery.error }
+  }
+
   return {
     success: true,
-    message: 'Password reset link created.',
-    email: user.email,
-    resetLink,
+    message: 'If an account exists for that email, a password reset email has been sent.',
   }
 }
 

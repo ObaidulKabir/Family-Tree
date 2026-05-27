@@ -435,30 +435,32 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
       ) : null}
       {!allowManage ? (
         <div
-          className={`w-full max-w-5xl rounded-2xl border px-4 py-4 text-sm shadow-sm ${
+          className={`w-full max-w-5xl rounded-xl border px-4 py-3 text-xs shadow-sm ${
             allowEdit
               ? 'border-amber-200 bg-amber-50 text-amber-900'
               : 'border-sky-200 bg-sky-50 text-sky-900'
           }`}
         >
-          <div className="font-semibold">
-            {allowEdit ? 'Editing access is limited in this graph' : 'This graph is view-only for your account'}
-          </div>
-          <div className="mt-1 text-xs">
-            You are currently using this graph as an {activeRole}.{' '}
-            {allowEdit
-              ? canInvite
-                ? `You can update family members here and invite ${allowedInviteRoles.map((role) => role.toLowerCase()).join(' or ')} contributors, but only a graph admin can manage contributor roles.`
-                : 'You can update family members in this workspace, but only higher graph roles can invite contributors or manage permissions.'
-              : canInvite
-                ? `You can browse the family graph, review updates, and invite ${allowedInviteRoles.map((role) => role.toLowerCase()).join(' or ')} contributors from this workspace.`
-                : 'You can browse the family graph and review updates here, but editing people, inviting contributors, and graph management are restricted to higher roles.'}
-          </div>
-          {!allowManage ? (
-            <div className="mt-3 flex flex-wrap gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="font-semibold">
+                {allowEdit ? 'Limited editing access' : 'View-only access'}
+              </div>
+              <div className="mt-0.5 text-[11px] text-current/80">
+                Role: {activeRole}
+                {allowEdit
+                  ? canInvite
+                    ? ` • Can invite ${allowedInviteRoles.map((role) => role.toLowerCase()).join(' or ')}`
+                    : ' • Invites restricted'
+                  : canInvite
+                    ? ` • Can invite ${allowedInviteRoles.map((role) => role.toLowerCase()).join(' or ')}`
+                    : ' • Editing + invites restricted'}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
               <Link
                 href="/dashboard/review"
-                className={`rounded-lg px-3 py-2 text-xs font-medium ${
+                className={`rounded-lg px-2.5 py-1.5 text-xs font-medium ${
                   allowEdit
                     ? 'bg-amber-600 text-white hover:bg-amber-700'
                     : 'bg-sky-600 text-white hover:bg-sky-700'
@@ -468,12 +470,12 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
               </Link>
               <Link
                 href="/dashboard/graph-management"
-                className="rounded-lg border border-current/20 bg-white/70 px-3 py-2 text-xs font-medium hover:bg-white"
+                className="rounded-lg border border-current/20 bg-white/70 px-2.5 py-1.5 text-xs font-medium hover:bg-white"
               >
                 Switch graph or view permissions
               </Link>
             </div>
-          ) : null}
+          </div>
         </div>
       ) : null}
       <div className="w-full max-w-5xl">
