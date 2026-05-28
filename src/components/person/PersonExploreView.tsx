@@ -3,7 +3,13 @@
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 
-import { getLatestProfessionalPosition, normalizeEducationHistory, normalizeProfessionalHistory } from '@/lib/personHistory'
+import {
+  getLatestProfessionalPosition,
+  normalizeEducationHistory,
+  normalizeProfessionalHistory,
+  type EducationHistoryEntry,
+  type ProfessionalHistoryEntry,
+} from '@/lib/personHistory'
 import {
   buildResidenceMapLink,
   deriveAgeLabel,
@@ -61,6 +67,24 @@ const emptyResidence = (): LivingHistoryEntry => ({
   longitude: '',
 })
 
+const emptyEducationEntry = (): EducationHistoryEntry => ({
+  institution: '',
+  degree: '',
+  fieldOfStudy: '',
+  startYear: '',
+  endYear: '',
+  description: '',
+})
+
+const emptyProfessionalEntry = (): ProfessionalHistoryEntry => ({
+  company: '',
+  position: '',
+  startYear: '',
+  endYear: '',
+  isCurrent: false,
+  description: '',
+})
+
 function formatDate(value?: string | Date | null) {
   if (!value) return ''
   const date = value instanceof Date ? value : new Date(value)
@@ -101,8 +125,26 @@ export default function PersonExploreView({
     ageLabel: '',
   })
 
-  const educationHistory = normalizeEducationHistory(person.educationHistory)
-  const professionalHistory = normalizeProfessionalHistory(person.professionalHistory)
+  const [educationHistory, setEducationHistory] = useState<EducationHistoryEntry[]>(() =>
+    normalizeEducationHistory(person.educationHistory)
+  )
+  const [educationDraft, setEducationDraft] = useState<EducationHistoryEntry[]>(() =>
+    normalizeEducationHistory(person.educationHistory)
+  )
+  const [editingEducation, setEditingEducation] = useState(false)
+  const [savingEducation, setSavingEducation] = useState(false)
+  const [educationMessage, setEducationMessage] = useState('')
+
+  const [professionalHistory, setProfessionalHistory] = useState<ProfessionalHistoryEntry[]>(() =>
+    normalizeProfessionalHistory(person.professionalHistory)
+  )
+  const [professionalDraft, setProfessionalDraft] = useState<ProfessionalHistoryEntry[]>(() =>
+    normalizeProfessionalHistory(person.professionalHistory)
+  )
+  const [editingProfessional, setEditingProfessional] = useState(false)
+  const [savingProfessional, setSavingProfessional] = useState(false)
+  const [professionalMessage, setProfessionalMessage] = useState('')
+
   const latestPosition = getLatestProfessionalPosition(professionalHistory)
 
   const filteredLivingHistory = useMemo(() => {
@@ -134,6 +176,94 @@ export default function PersonExploreView({
     setLivingHistory((current) =>
       current.map((entry, entryIndex) => (entryIndex === index ? { ...entry, [field]: value } : entry))
     )
+  }
+
+  const updateEducationEntry = (index: number, field: keyof EducationHistoryEntry, value: string) => {
+    setEducationDraft((current) => current.map((entry, entryIndex) => (entryIndex === index ? { ...entry, [field]: value } : entry)))
+  }
+
+  const updateProfessionalEntry = (index: number, field: keyof ProfessionalHistoryEntry, value: string | boolean) => {
+    setProfessionalDraft((current) =>
+      current.map((entry, entryIndex) => (entryIndex === index ? { ...entry, [field]: value } : entry))
+    )
+  }
+
+  const openEducationEditor = () => {
+    setEducationMessage('')
+    setEducationDraft(educationHistory.length > 0 ? educationHistory : [emptyEducationEntry()])
+    setEditingEducation(true)
+  }
+
+  const openProfessionalEditor = () => {
+    setProfessionalMessage('')
+    setProfessionalDraft(professionalHistory.length > 0 ? professionalHistory : [emptyProfessionalEntry()])
+    setEditingProfessional(true)
+  }
+
+  const cancelEducationEditor = () => {
+    setEducationMessage('')
+    setEducationDraft(educationHistory)
+    setEditingEducation(false)
+  }
+
+  const cancelProfessionalEditor = () => {
+    setProfessionalMessage('')
+    setProfessionalDraft(professionalHistory)
+    setEditingProfessional(false)
+  }
+
+  const saveEducationHistory = async () => {
+    setSavingEducation(true)
+    setEducationMessage('')
+    try {
+      const response = await fetch(`/api/person/${person.id}/profile`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ educationHistory: educationDraft }),
+      })
+
+      const result = await response.json()
+      if (!response.ok) {
+        setEducationMessage(result.error ?? 'Failed to save education history.')
+        return
+      }
+
+      setEducationHistory(result.person.educationHistory)
+      setEducationDraft(result.person.educationHistory)
+      setEditingEducation(false)
+      setEducationMessage('Education history saved.')
+    } catch {
+      setEducationMessage('Failed to save education history.')
+    } finally {
+      setSavingEducation(false)
+    }
+  }
+
+  const saveProfessionalHistory = async () => {
+    setSavingProfessional(true)
+    setProfessionalMessage('')
+    try {
+      const response = await fetch(`/api/person/${person.id}/profile`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ professionalHistory: professionalDraft }),
+      })
+
+      const result = await response.json()
+      if (!response.ok) {
+        setProfessionalMessage(result.error ?? 'Failed to save professional history.')
+        return
+      }
+
+      setProfessionalHistory(result.person.professionalHistory)
+      setProfessionalDraft(result.person.professionalHistory)
+      setEditingProfessional(false)
+      setProfessionalMessage('Professional history saved.')
+    } catch {
+      setProfessionalMessage('Failed to save professional history.')
+    } finally {
+      setSavingProfessional(false)
+    }
   }
 
   const saveLivingHistory = async () => {
@@ -293,33 +423,249 @@ export default function PersonExploreView({
       {activeTab === 'overview' ? (
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">Educational timeline</h2>
-            <div className="mt-4 space-y-4">
-              {educationHistory.length > 0 ? educationHistory.map((entry, index) => (
-                <div key={`edu-${index}`} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
-                  <div className="font-medium text-slate-900">{entry.institution || 'Institution not specified'}</div>
-                  <div className="text-sm text-slate-600">{[entry.degree, entry.fieldOfStudy].filter(Boolean).join(', ') || 'No degree details'}</div>
-                  <div className="mt-1 text-xs text-slate-500">{[entry.startYear, entry.endYear].filter(Boolean).join(' - ') || 'Dates not specified'}</div>
-                  {entry.description ? <p className="mt-2 text-sm text-slate-600">{entry.description}</p> : null}
-                </div>
-              )) : <p className="text-sm text-slate-500">No educational history recorded yet.</p>}
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Educational timeline</h2>
+                <p className="mt-1 text-sm text-slate-500">Add schools, degrees, and study periods.</p>
+              </div>
+              {permission.canEdit ? (
+                editingEducation ? (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEducationDraft((current) => [...current, emptyEducationEntry()])}
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-50"
+                    >
+                      Add entry
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveEducationHistory}
+                      disabled={savingEducation}
+                      className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {savingEducation ? 'Saving...' : 'Save'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelEducationEditor}
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={openEducationEditor}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-50"
+                  >
+                    Manage
+                  </button>
+                )
+              ) : null}
             </div>
+
+            {educationMessage ? (
+              <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{educationMessage}</div>
+            ) : null}
+
+            {editingEducation ? (
+              <div className="mt-4 space-y-4">
+                {educationDraft.map((entry, index) => (
+                  <div key={`edu-edit-${index}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Entry {index + 1}</div>
+                      <button
+                        type="button"
+                        onClick={() => setEducationDraft((current) => current.filter((_, entryIndex) => entryIndex !== index))}
+                        className="text-sm font-medium text-rose-600 hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <input className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" placeholder="Institution" value={entry.institution} onChange={(event) => updateEducationEntry(index, 'institution', event.target.value)} />
+                      <input className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" placeholder="Degree" value={entry.degree} onChange={(event) => updateEducationEntry(index, 'degree', event.target.value)} />
+                      <input className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" placeholder="Field of study" value={entry.fieldOfStudy} onChange={(event) => updateEducationEntry(index, 'fieldOfStudy', event.target.value)} />
+                      <div className="grid grid-cols-2 gap-2">
+                        <input className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" placeholder="Start year" value={entry.startYear} onChange={(event) => updateEducationEntry(index, 'startYear', event.target.value)} />
+                        <input className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" placeholder="End year" value={entry.endYear} onChange={(event) => updateEducationEntry(index, 'endYear', event.target.value)} />
+                      </div>
+                      <textarea className="md:col-span-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" rows={3} placeholder="Notes" value={entry.description} onChange={(event) => updateEducationEntry(index, 'description', event.target.value)} />
+                    </div>
+                  </div>
+                ))}
+                {educationDraft.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-600">
+                    No entries in draft. Add a new entry to start building the timeline.
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="mt-4">
+                {educationHistory.length > 0 ? (
+                  <div className="relative pl-6">
+                    <div className="absolute left-2 top-0 h-full w-px bg-slate-200" />
+                    <div className="space-y-5">
+                      {educationHistory.map((entry, index) => (
+                        <div key={`edu-${index}`} className="relative rounded-xl border border-slate-100 bg-slate-50 p-4">
+                          <div className="absolute -left-[7px] top-5 h-3 w-3 rounded-full bg-indigo-600 ring-4 ring-white" />
+                          <div className="flex flex-wrap items-baseline justify-between gap-2">
+                            <div className="font-medium text-slate-900">{entry.institution || 'Institution not specified'}</div>
+                            <div className="text-xs text-slate-500">{[entry.startYear, entry.endYear].filter(Boolean).join(' - ') || 'Dates not specified'}</div>
+                          </div>
+                          <div className="mt-1 text-sm text-slate-600">
+                            {[entry.degree, entry.fieldOfStudy].filter(Boolean).join(', ') || 'No degree details'}
+                          </div>
+                          {entry.description ? <p className="mt-2 text-sm text-slate-600">{entry.description}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6">
+                    <p className="text-sm text-slate-600">No educational history recorded yet.</p>
+                    {permission.canEdit ? (
+                      <button
+                        type="button"
+                        onClick={openEducationEditor}
+                        className="mt-3 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                      >
+                        Add first entry
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            )}
           </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">Professional timeline</h2>
-            <div className="mt-4 space-y-4">
-              {professionalHistory.length > 0 ? professionalHistory.map((entry, index) => (
-                <div key={`job-${index}`} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
-                  <div className="font-medium text-slate-900">{entry.position || 'Position not specified'}</div>
-                  <div className="text-sm text-slate-600">{entry.company || 'Organization not specified'}</div>
-                  <div className="mt-1 text-xs text-slate-500">
-                    {entry.isCurrent ? 'Current role' : [entry.startYear, entry.endYear].filter(Boolean).join(' - ') || 'Dates not specified'}
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Professional timeline</h2>
+                <p className="mt-1 text-sm text-slate-500">Add roles, employers, and career highlights.</p>
+              </div>
+              {permission.canEdit ? (
+                editingProfessional ? (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setProfessionalDraft((current) => [...current, emptyProfessionalEntry()])}
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-50"
+                    >
+                      Add role
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveProfessionalHistory}
+                      disabled={savingProfessional}
+                      className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {savingProfessional ? 'Saving...' : 'Save'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelProfessionalEditor}
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
                   </div>
-                  {entry.description ? <p className="mt-2 text-sm text-slate-600">{entry.description}</p> : null}
-                </div>
-              )) : <p className="text-sm text-slate-500">No professional history recorded yet.</p>}
+                ) : (
+                  <button
+                    type="button"
+                    onClick={openProfessionalEditor}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-50"
+                  >
+                    Manage
+                  </button>
+                )
+              ) : null}
             </div>
+
+            {professionalMessage ? (
+              <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{professionalMessage}</div>
+            ) : null}
+
+            {editingProfessional ? (
+              <div className="mt-4 space-y-4">
+                {professionalDraft.map((entry, index) => (
+                  <div key={`job-edit-${index}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Role {index + 1}</div>
+                      <button
+                        type="button"
+                        onClick={() => setProfessionalDraft((current) => current.filter((_, entryIndex) => entryIndex !== index))}
+                        className="text-sm font-medium text-rose-600 hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <input className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" placeholder="Position" value={entry.position} onChange={(event) => updateProfessionalEntry(index, 'position', event.target.value)} />
+                      <input className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" placeholder="Company / organization" value={entry.company} onChange={(event) => updateProfessionalEntry(index, 'company', event.target.value)} />
+                      <div className="grid grid-cols-2 gap-2">
+                        <input className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" placeholder="Start year" value={entry.startYear} onChange={(event) => updateProfessionalEntry(index, 'startYear', event.target.value)} />
+                        <input className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" placeholder="End year" value={entry.endYear} onChange={(event) => updateProfessionalEntry(index, 'endYear', event.target.value)} />
+                      </div>
+                      <label className="flex items-center gap-2 text-sm text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={entry.isCurrent}
+                          onChange={(event) => updateProfessionalEntry(index, 'isCurrent', event.target.checked)}
+                          className="h-4 w-4"
+                        />
+                        Current role
+                      </label>
+                      <textarea className="md:col-span-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" rows={3} placeholder="Notes" value={entry.description} onChange={(event) => updateProfessionalEntry(index, 'description', event.target.value)} />
+                    </div>
+                  </div>
+                ))}
+                {professionalDraft.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-600">
+                    No roles in draft. Add a role to start building the timeline.
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="mt-4">
+                {professionalHistory.length > 0 ? (
+                  <div className="relative pl-6">
+                    <div className="absolute left-2 top-0 h-full w-px bg-slate-200" />
+                    <div className="space-y-5">
+                      {professionalHistory.map((entry, index) => (
+                        <div key={`job-${index}`} className="relative rounded-xl border border-slate-100 bg-slate-50 p-4">
+                          <div className="absolute -left-[7px] top-5 h-3 w-3 rounded-full bg-indigo-600 ring-4 ring-white" />
+                          <div className="flex flex-wrap items-baseline justify-between gap-2">
+                            <div className="font-medium text-slate-900">{entry.position || 'Position not specified'}</div>
+                            <div className="text-xs text-slate-500">
+                              {entry.isCurrent ? 'Current role' : [entry.startYear, entry.endYear].filter(Boolean).join(' - ') || 'Dates not specified'}
+                            </div>
+                          </div>
+                          <div className="mt-1 text-sm text-slate-600">{entry.company || 'Organization not specified'}</div>
+                          {entry.description ? <p className="mt-2 text-sm text-slate-600">{entry.description}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6">
+                    <p className="text-sm text-slate-600">No professional history recorded yet.</p>
+                    {permission.canEdit ? (
+                      <button
+                        type="button"
+                        onClick={openProfessionalEditor}
+                        className="mt-3 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                      >
+                        Add first role
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            )}
           </section>
         </div>
       ) : null}

@@ -11,6 +11,7 @@ import {
     buildExistingParentLinkAuditDescription,
     buildExistingSpouseLinkAuditDescription,
     validateChildSpouseAssociation,
+    validateChildSpouseReassignment,
     validateExistingChildLink,
     validateExistingParentLink,
     validateExistingSpouseLink
@@ -1690,5 +1691,268 @@ export async function associateChildWithSpouse(
             return { error: error.message };
         }
         return { error: "Failed to associate child with spouse" };
+    }
+}
+
+export async function reassignChildToSpouse(
+    personId: string,
+    spouseId: string,
+    spouseFamilyId: string,
+    childId: string
+) {
+    const session = await auth();
+    if (!session?.user) return { error: "Unauthorized" };
+    if (!session.user.id) return { error: "Unauthorized" };
+    const userId = session.user.id;
+    const graphContext = await requireGraphPermissionForPerson(prisma, userId, personId, 'edit')
+    await Promise.all([
+      ensurePersonEditableInGraph(userId, spouseId, graphContext.graphId),
+      ensurePersonEditableInGraph(userId, childId, graphContext.graphId),
+    ])
+
+    try {
+        const result = await prisma.$transaction(async (tx) => {
+            const [spouseFamily, child] = await Promise.all([
+                tx.family.findUnique({
+                    where: { id: spouseFamilyId },
+                    select: {
+                        id: true,
+                        parent1Id: true,
+                        parent2Id: true
+                    }
+                }),
+                tx.person.findUnique({
+                    where: { id: childId },
+                    select: {
+                        id: true,
+                        childOfFamilyId: true,
+                        childOfFamily: {
+                            select: {
+                                id: true,
+                                parent1Id: true,
+                                parent2Id: true
+                            }
+                        }
+                    }
+                })
+            ])
+
+            if (!child) {
+                throw new Error("Child not found");
+            }
+
+            const validation = validateChildSpouseReassignment({
+                parentId: personId,
+                spouseId,
+                childId,
+                spouseFamily,
+                childFamily: child.childOfFamily
+            })
+
+            if (!validation.valid) {
+                throw new Error(validation.error)
+            }
+
+            const previousFamilyId = child.childOfFamilyId
+
+            await tx.person.update({
+                where: { id: childId },
+                data: {
+                    childOfFamilyId: spouseFamilyId
+                }
+            })
+
+            const childDistance = await computeRelationshipDistance(tx, userId, childId)
+
+            await createRelationshipClaim(tx, {
+                fromPersonId: spouseId,
+                toPersonId: childId,
+                relationshipType: 'BIO_PARENT',
+                contributorId: userId,
+                computedDistance: childDistance,
+            })
+            await createRelationshipClaim(tx, {
+                fromPersonId: childId,
+                toPersonId: spouseId,
+                relationshipType: 'CHILD',
+                contributorId: userId,
+                computedDistance: childDistance,
+            })
+
+            await tx.familyEvent.create({
+                data: {
+                    type: 'CHILD_ASSOCIATION_CHANGED',
+                    familyId: spouseFamilyId,
+                    date: new Date(),
+                    description: buildChildAssociationAuditDescription({
+                        actorUserId: userId,
+                        parentId: personId,
+                        spouseId,
+                        childId,
+                        previousFamilyId,
+                        nextFamilyId: spouseFamilyId,
+                    })
+                }
+            })
+
+            if (previousFamilyId && previousFamilyId !== spouseFamilyId) {
+                const previousFamily = await tx.family.findUnique({
+                    where: { id: previousFamilyId },
+                    select: {
+                        id: true,
+                        parent1Id: true,
+                        parent2Id: true,
+                        children: {
+                            select: { id: true }
+                        },
+                        events: {
+                            select: { id: true }
+                        }
+                    }
+                })
+
+                if (
+                    previousFamily &&
+                    [previousFamily.parent1Id, previousFamily.parent2Id].includes(personId) &&
+                    !previousFamily.parent2Id &&
+                    previousFamily.children.length === 0 &&
+                    previousFamily.events.length === 0
+                ) {
+                    await tx.family.delete({
+                        where: { id: previousFamily.id }
+                    })
+                }
+            }
+
+            await tx.person.updateMany({
+                where: {
+                    id: { in: [personId, spouseId, childId] },
+                    graphId: null,
+                },
+                data: { graphId: graphContext.graphId },
+            })
+
+            await createGraphAuditEntry(tx, {
+                graphId: graphContext.graphId,
+                actorUserId: userId,
+                action: 'CHILD_ASSOCIATION_CHANGED',
+                entityType: 'FAMILY',
+                entityId: spouseFamilyId,
+                details: {
+                    personId,
+                    spouseId,
+                    childId,
+                    previousFamilyId,
+                },
+            })
+
+            return { success: true }
+        })
+
+        revalidatePath('/dashboard');
+        return result;
+    } catch (error) {
+        console.error(error);
+        if (error instanceof Error && error.message) {
+            return { error: error.message };
+        }
+        return { error: "Failed to change child association" };
+    }
+}
+
+export async function deletePerson(personId: string) {
+    const session = await auth();
+    if (!session?.user?.id) return { error: "Unauthorized" };
+    const userId = session.user.id;
+
+    const graphContext = await requireGraphPermissionForPerson(prisma, userId, personId, 'edit')
+    const role = typeof graphContext.role === 'string' ? graphContext.role.trim().toUpperCase() : ''
+    if (role !== 'OWNER') {
+        return { error: 'Only the graph owner can delete people.' }
+    }
+
+    const [graphRoot, userRoot, scopeCount, person] = await Promise.all([
+        prisma.familyGraph.findFirst({ where: { rootPersonId: personId }, select: { id: true } }),
+        prisma.user.findFirst({ where: { rootPersonId: personId }, select: { id: true } }),
+        prisma.graphMembershipScope.count({ where: { anchorPersonId: personId } }),
+        prisma.person.findUnique({
+            where: { id: personId },
+            select: { id: true, linkedUserId: true }
+        })
+    ])
+
+    if (!person) return { error: 'Person not found' }
+    if (graphRoot) return { error: 'Cannot delete the root person of a graph.' }
+    if (userRoot || person.linkedUserId) return { error: 'Cannot delete a person linked to a user account.' }
+    if (scopeCount > 0) return { error: 'Cannot delete a person that is used as a permission anchor.' }
+
+    try {
+        const result = await prisma.$transaction(async (tx) => {
+            const affectedFamilies = await tx.family.findMany({
+                where: {
+                    OR: [{ parent1Id: personId }, { parent2Id: personId }]
+                },
+                select: { id: true }
+            })
+
+            await tx.graphInvitation.updateMany({
+                where: { targetPersonId: personId },
+                data: { targetPersonId: null },
+            })
+
+            await tx.family.updateMany({
+                where: { parent1Id: personId },
+                data: { parent1Id: null },
+            })
+            await tx.family.updateMany({
+                where: { parent2Id: personId },
+                data: { parent2Id: null },
+            })
+
+            if (affectedFamilies.length > 0) {
+                const families = await tx.family.findMany({
+                    where: { id: { in: affectedFamilies.map((family) => family.id) } },
+                    select: {
+                        id: true,
+                        parent1Id: true,
+                        parent2Id: true,
+                        children: { select: { id: true }, take: 1 },
+                        events: { select: { id: true }, take: 1 },
+                    }
+                })
+
+                const deletable = families
+                    .filter((family) => !family.parent1Id && !family.parent2Id && family.children.length === 0 && family.events.length === 0)
+                    .map((family) => family.id)
+
+                if (deletable.length > 0) {
+                    await tx.family.deleteMany({ where: { id: { in: deletable } } })
+                }
+            }
+
+            await tx.person.delete({ where: { id: personId } })
+
+            await createGraphAuditEntry(tx, {
+                graphId: graphContext.graphId,
+                actorUserId: userId,
+                action: 'PERSON_DELETED',
+                entityType: 'PERSON',
+                entityId: personId,
+                details: {
+                    personId,
+                },
+            })
+
+            return { success: true }
+        })
+
+        revalidatePath('/dashboard');
+        return result;
+    } catch (error) {
+        console.error(error);
+        if (error instanceof Error && error.message) {
+            return { error: error.message };
+        }
+        return { error: "Failed to delete person" };
     }
 }

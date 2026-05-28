@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { updatePerson } from '@/actions/family';
+import { deletePerson, updatePerson } from '@/actions/family';
 import { Loader2, Upload, X } from 'lucide-react';
 import {
   normalizeEducationHistory,
@@ -35,6 +35,8 @@ interface EditPersonModalProps {
   };
   onClose: () => void;
   onSuccess: () => void;
+  canDelete?: boolean;
+  onDeleted?: (personId: string) => void;
 }
 
 const emptyEducationEntry = (): EducationHistoryEntry => ({
@@ -75,7 +77,7 @@ function normalizePhotoUrl(value: string) {
   return `/${cleaned}`
 }
 
-export default function EditPersonModal({ person, onClose, onSuccess }: EditPersonModalProps) {
+export default function EditPersonModal({ person, onClose, onSuccess, canDelete, onDeleted }: EditPersonModalProps) {
   const initialEducationHistory = normalizeEducationHistory(person.educationHistory)
   const initialProfessionalHistory = normalizeProfessionalHistory(person.professionalHistory)
   const [activeTab, setActiveTab] = useState<ModalTabId>('personal')
@@ -101,6 +103,9 @@ export default function EditPersonModal({ person, onClose, onSuccess }: EditPers
   const [error, setError] = useState('');
   const [replacePhoto, setReplacePhoto] = useState(true);
   const [removePhoto, setRemovePhoto] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -203,6 +208,25 @@ export default function EditPersonModal({ person, onClose, onSuccess }: EditPers
         entryIndex === index ? { ...entry, [field]: value } : entry
       ),
     }))
+  }
+
+  const handleDelete = async () => {
+    setDeleteLoading(true)
+    setDeleteError('')
+    setError('')
+    try {
+      const result = await deletePerson(person.id)
+      if (result && typeof result === 'object' && 'error' in result && result.error) {
+        setDeleteError(String(result.error))
+        return
+      }
+      onDeleted?.(person.id)
+      onClose()
+    } catch {
+      setDeleteError('Failed to delete person.')
+    } finally {
+      setDeleteLoading(false)
+    }
   }
 
   return (
@@ -413,6 +437,30 @@ export default function EditPersonModal({ person, onClose, onSuccess }: EditPers
                   </div>
                   <p className="text-xs text-gray-500 mt-1">Upload directly from your device or paste an image URL. Supported: JPG, PNG, WEBP, GIF up to 5MB.</p>
               </div>
+
+              {canDelete ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 p-4">
+                  <div className="text-sm font-semibold text-rose-900">Delete person</div>
+                  <div className="mt-1 text-xs text-rose-800">This removes the person and unlinks them from families. This cannot be undone.</div>
+                  <div className="mt-3 grid gap-2">
+                    <input
+                      className="w-full rounded border border-rose-200 bg-white px-3 py-2 text-sm"
+                      placeholder='Type DELETE to confirm'
+                      value={deleteConfirm}
+                      onChange={(event) => setDeleteConfirm(event.target.value)}
+                    />
+                    {deleteError ? <div className="rounded bg-white/70 px-3 py-2 text-sm text-rose-700">{deleteError}</div> : null}
+                    <button
+                      type="button"
+                      onClick={handleDelete}
+                      disabled={deleteLoading || deleteConfirm.trim().toUpperCase() !== 'DELETE'}
+                      className="w-full rounded bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50"
+                    >
+                      {deleteLoading ? 'Deleting...' : 'Delete person'}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </>
           ) : null}
 

@@ -146,6 +146,46 @@ export function validateChildSpouseAssociation(input: {
   return { valid: true as const }
 }
 
+export function validateChildSpouseReassignment(input: {
+  parentId: string
+  spouseId: string
+  childId: string
+  spouseFamily: FamilyLike | null
+  childFamily: FamilyLike | null
+}) {
+  if (input.parentId === input.spouseId) {
+    return { valid: false as const, error: 'Person and spouse must be different people.' }
+  }
+
+  if (input.childId === input.parentId || input.childId === input.spouseId) {
+    return { valid: false as const, error: 'Selected child must be different from both parents.' }
+  }
+
+  if (!input.spouseFamily) {
+    return { valid: false as const, error: 'Selected spouse is not linked to this family.' }
+  }
+
+  const spouseFamilyParentIds = [input.spouseFamily.parent1Id, input.spouseFamily.parent2Id].filter(Boolean)
+  if (!spouseFamilyParentIds.includes(input.parentId) || !spouseFamilyParentIds.includes(input.spouseId)) {
+    return { valid: false as const, error: 'Selected spouse is not linked to this family.' }
+  }
+
+  if (!input.childFamily) {
+    return { valid: false as const, error: 'Selected child is not currently linked to this parent.' }
+  }
+
+  if (input.childFamily.id === input.spouseFamily.id) {
+    return { valid: false as const, error: 'Selected child is already associated with this spouse.' }
+  }
+
+  const childFamilyParentIds = [input.childFamily.parent1Id, input.childFamily.parent2Id].filter(Boolean)
+  if (!childFamilyParentIds.includes(input.parentId)) {
+    return { valid: false as const, error: 'Selected child does not belong to this family unit.' }
+  }
+
+  return { valid: true as const }
+}
+
 export function buildChildAssociationAuditDescription(input: {
   actorUserId: string
   parentId: string

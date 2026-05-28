@@ -3,7 +3,7 @@
 import { format } from 'date-fns';
 import Link from 'next/link';
 import { useState, useEffect, useRef } from 'react';
-import { getPersonDetails, searchPeopleInCurrentGraph } from '@/actions/family';
+import { getPersonDetails, reassignChildToSpouse, searchPeopleInCurrentGraph } from '@/actions/family';
 import { getGraphCollaborationBarData, touchGraphPresence } from '@/actions/graphManagement';
 import { getLatestProfessionalPosition, normalizeProfessionalHistory } from '@/lib/personHistory';
 import { User as UserIcon, Heart, Plus, Share2, Edit2, X } from 'lucide-react';
@@ -190,6 +190,10 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
   const [showAssociateChildModal, setShowAssociateChildModal] = useState(false);
   const [selectedSpouse, setSelectedSpouse] = useState<PersonLike | null>(null);
   const [associationSpouse, setAssociationSpouse] = useState<PersonLike | null>(null);
+  const [childAssociationEditingId, setChildAssociationEditingId] = useState<string | null>(null);
+  const [childAssociationSpouseId, setChildAssociationSpouseId] = useState<string>('');
+  const [childAssociationSaving, setChildAssociationSaving] = useState(false);
+  const [childAssociationMessage, setChildAssociationMessage] = useState('');
   const [editingPerson, setEditingPerson] = useState<PersonLike | null>(null);
   const [openingEditModal, setOpeningEditModal] = useState(false);
   const [addRelationType, setAddRelationType] = useState<'PARENT' | 'CHILD' | 'SPOUSE' | null>(null);
@@ -359,6 +363,48 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
       loadPerson(currentPersonId);
   };
 
+  const openChildAssociationEditor = (child: PersonLike) => {
+      const spouseOptions = data?.spouses ?? []
+      const associated = spouseOptions.find((spouse) => spouse.familyId && spouse.familyId === child.childOfFamilyId)
+      const defaultSpouse = associated ?? spouseOptions.find((spouse) => Boolean(spouse.familyId)) ?? null
+      setChildAssociationMessage('')
+      setChildAssociationEditingId(child.id)
+      setChildAssociationSpouseId(defaultSpouse?.id ?? '')
+  }
+
+  const closeChildAssociationEditor = () => {
+      setChildAssociationMessage('')
+      setChildAssociationEditingId(null)
+      setChildAssociationSpouseId('')
+      setChildAssociationSaving(false)
+  }
+
+  const saveChildAssociation = async () => {
+      if (!childAssociationEditingId) return
+      const spouseOptions = data?.spouses ?? []
+      const selected = spouseOptions.find((spouse) => spouse.id === childAssociationSpouseId)
+      if (!selected?.familyId) {
+          setChildAssociationMessage('Select a spouse to continue.')
+          return
+      }
+
+      setChildAssociationSaving(true)
+      setChildAssociationMessage('')
+      try {
+          const result = await reassignChildToSpouse(currentPersonId, selected.id, selected.familyId, childAssociationEditingId)
+          if (result && typeof result === 'object' && 'error' in result && result.error) {
+              setChildAssociationMessage(String(result.error))
+              return
+          }
+          closeChildAssociationEditor()
+          loadPerson(currentPersonId)
+      } catch {
+          setChildAssociationMessage('Failed to change child association.')
+      } finally {
+          setChildAssociationSaving(false)
+      }
+  }
+
   if (loading) return <div className="flex h-96 items-center justify-center text-gray-400">Loading family data...</div>;
   if (!data) return <div className="flex h-96 items-center justify-center text-red-400">Person not found</div>;
 
@@ -373,6 +419,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
       : typeof data.graphPermission?.role === 'string'
         ? data.graphPermission.role.trim().toUpperCase()
         : ''
+  const canDeletePeople = normalizedGraphRole === 'OWNER'
   const derivedInviteRoles =
     normalizedGraphRole === 'ADMIN' || normalizedGraphRole === 'OWNER'
       ? ['EDITOR', 'COMMENTER', 'VIEWER']
@@ -730,13 +777,74 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
          
         <h3 className="mb-4 text-xs font-bold text-gray-400 tracking-wider uppercase">Children</h3>
         <div className="flex gap-6 flex-wrap justify-center">
-          {children.map((c: PersonLike) => (
-            <div key={c.id} className="relative pt-6">
-                {/* Vertical line from horizontal bar to child */}
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 h-6 w-0.5 bg-gray-300"></div>
-                <PersonCard person={c} displayNameMode="nicknameOrFull" aliasRoles={[...(roleAliases.get(c.id) ?? [])].filter((role) => role !== 'child')} onClick={() => setCurrentPersonId(c.id)} onEdit={allowEdit ? () => handleEdit(c) : undefined} />
-            </div>
-          ))}
+          {children.map((c: PersonLike) => {
+            const associatedSpouse = spouses.find((spouse) => spouse.familyId && spouse.familyId === c.childOfFamilyId) ?? null
+            const spouseOptions = spouses.filter((spouse) => Boolean(spouse.familyId))
+            const canChangeAssociation = allowEdit && spouseOptions.length > 1
+
+            return (
+              <div key={c.id} className="relative pt-6">
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 h-6 w-0.5 bg-gray-300"></div>
+                  <PersonCard person={c} displayNameMode="nicknameOrFull" aliasRoles={[...(roleAliases.get(c.id) ?? [])].filter((role) => role !== 'child')} onClick={() => setCurrentPersonId(c.id)} onEdit={allowEdit ? () => handleEdit(c) : undefined} />
+                  {spouseOptions.length > 0 ? (
+                    <div className="mt-2 flex flex-col items-center gap-2">
+                      <div className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                        Other parent: {associatedSpouse ? `${associatedSpouse.firstName} ${associatedSpouse.lastName ?? ''}`.trim() : 'Not set'}
+                      </div>
+                      {canChangeAssociation ? (
+                        childAssociationEditingId === c.id ? (
+                          <div className="w-56 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Change child association</div>
+                            <select
+                              value={childAssociationSpouseId}
+                              onChange={(event) => setChildAssociationSpouseId(event.target.value)}
+                              className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                            >
+                              {spouseOptions.map((spouse) => (
+                                <option key={spouse.id} value={spouse.id}>
+                                  {`${spouse.firstName} ${spouse.lastName ?? ''}`.trim() || spouse.firstName}
+                                </option>
+                              ))}
+                            </select>
+                            {childAssociationMessage ? (
+                              <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{childAssociationMessage}</div>
+                            ) : null}
+                            <div className="mt-3 flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={saveChildAssociation}
+                                disabled={childAssociationSaving}
+                                className="flex-1 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                              >
+                                {childAssociationSaving ? 'Saving...' : 'Save'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={closeChildAssociationEditor}
+                                className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-50"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              openChildAssociationEditor(c)
+                            }}
+                            className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-indigo-700 hover:bg-indigo-100"
+                          >
+                            Change other parent
+                          </button>
+                        )
+                      ) : null}
+                    </div>
+                  ) : null}
+              </div>
+            )
+          })}
           {allowEdit ? <div className="pt-6 relative">
              <div className="absolute top-0 left-1/2 -translate-x-1/2 h-6 w-0.5 bg-gray-300"></div>
              <AddButton onClick={() => handleAdd('CHILD')} label="Add Child" />
@@ -760,6 +868,16 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
             person={editingPerson}
             onClose={() => { setShowEditModal(false); setEditingPerson(null); }}
             onSuccess={handlePersonUpdated}
+            canDelete={canDeletePeople}
+            onDeleted={(deletedId) => {
+              setShowEditModal(false)
+              setEditingPerson(null)
+              if (deletedId === currentPersonId) {
+                window.location.assign('/dashboard')
+                return
+              }
+              loadPerson(currentPersonId)
+            }}
           />
       )}
       

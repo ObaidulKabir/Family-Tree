@@ -11,6 +11,7 @@ import {
   validateExistingParentLink,
   validateExistingSpouseLink,
   validateChildSpouseAssociation,
+  validateChildSpouseReassignment,
 } from './familyAssociation'
 
 test('getAssociableChildrenForSpouse excludes children already linked to the spouse family', () => {
@@ -62,6 +63,18 @@ test('validateChildSpouseAssociation rejects a spouse outside the current family
 
   assert.equal(result.valid, false)
   assert.equal(result.error, 'Selected spouse is not linked to this family.')
+})
+
+test('validateChildSpouseReassignment allows moving a child between two-parent families', () => {
+  const result = validateChildSpouseReassignment({
+    parentId: 'p1',
+    spouseId: 'p2',
+    childId: 'c1',
+    spouseFamily: { id: 'f2', parent1Id: 'p1', parent2Id: 'p2' },
+    childFamily: { id: 'f1', parent1Id: 'p1', parent2Id: 'p3' },
+  })
+
+  assert.equal(result.valid, true)
 })
 
 test('buildChildAssociationAuditDescription records the association metadata', () => {

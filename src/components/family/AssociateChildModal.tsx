@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { associateChildWithSpouse } from '@/actions/family';
+import { reassignChildToSpouse } from '@/actions/family';
 import { X } from 'lucide-react';
 import { getAssociableChildrenForSpouse } from '@/lib/familyAssociation';
 
@@ -55,7 +55,7 @@ export default function AssociateChildModal({ personId, spouse, availableChildre
     setError('');
 
     try {
-      const result = await associateChildWithSpouse(personId, spouse.id, spouse.familyId, childId);
+      const result = await reassignChildToSpouse(personId, spouse.id, spouse.familyId, childId);
 
       if ('error' in result) {
         setError(result.error);
@@ -74,9 +74,9 @@ export default function AssociateChildModal({ personId, spouse, availableChildre
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md overflow-hidden">
         <div className="flex justify-between items-center p-4 border-b">
           <div>
-            <h3 className="font-semibold text-lg">Associate Child with Spouse</h3>
+            <h3 className="font-semibold text-lg">Change Child Association</h3>
             <p className="text-sm text-gray-500">
-              Link an existing child to {spouse.firstName} {spouse.lastName}.
+              Assign an existing child to {spouse.firstName} {spouse.lastName}.
             </p>
           </div>
           <button onClick={onClose}><X size={20} /></button>
@@ -104,7 +104,7 @@ export default function AssociateChildModal({ personId, spouse, availableChildre
                 ))}
               </select>
               <p className="text-xs text-gray-500 mt-2">
-                This moves the selected child into the shared family for this spouse and records an audit event.
+                This updates which spouse/family unit the child belongs to and records an audit event.
               </p>
             </div>
           )}
@@ -122,7 +122,7 @@ export default function AssociateChildModal({ personId, spouse, availableChildre
               disabled={loading || eligibleChildren.length === 0}
               className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50"
             >
-              {loading ? 'Saving...' : 'Associate Child'}
+              {loading ? 'Saving...' : 'Save'}
             </button>
           </div>
         </form>
