@@ -2,7 +2,7 @@
 
 import { format } from 'date-fns';
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getPersonDetails, reassignChildToSpouse, searchPeopleInCurrentGraph } from '@/actions/family';
 import { getGraphCollaborationBarData, touchGraphPresence } from '@/actions/graphManagement';
 import { getLifeStatusLabel, isDeceasedStatus, normalizeLifeStatus } from '@/lib/lifeStatus';
@@ -539,14 +539,10 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
       child: children,
       sibling: siblings
   })
-  const breadcrumbs = useMemo(() => {
-    const start = Math.max(0, navState.index - 3)
-    const slice = navState.entries.slice(start, navState.index + 1)
-    return {
-      start,
-      items: slice.map((entry, idx) => ({ entry, index: start + idx })),
-    }
-  }, [navState.entries, navState.index])
+  const breadcrumbStart = Math.max(0, navState.index - 3)
+  const breadcrumbs = navState.entries
+    .slice(breadcrumbStart, navState.index + 1)
+    .map((entry, idx) => ({ entry, index: breadcrumbStart + idx }))
 
   return (
     <div className="flex flex-col items-center gap-8 min-h-[600px] py-10">
@@ -628,10 +624,10 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
           <div className="min-w-0 overflow-x-auto">
             <div className="flex min-w-0 flex-nowrap items-center gap-2 whitespace-nowrap text-sm text-slate-600">
               <span className="hidden sm:inline text-slate-500">History:</span>
-            {breadcrumbs.start > 0 ? (
+            {breadcrumbStart > 0 ? (
               <span className="text-slate-400">…</span>
             ) : null}
-            {breadcrumbs.items.map((item, idx, arr) => {
+            {breadcrumbs.map((item, idx, arr) => {
               const active = item.index === navState.index
               const label = item.entry.label || item.entry.personId.slice(0, 8)
               return (
