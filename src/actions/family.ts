@@ -1867,7 +1867,7 @@ export async function deletePerson(personId: string) {
 
     const graphContext = await requireGraphPermissionForPerson(prisma, userId, personId, 'edit')
     const role = typeof graphContext.role === 'string' ? graphContext.role.trim().toUpperCase() : ''
-    if (role !== 'OWNER') {
+    if (role !== 'OWNER' && role !== 'ADMIN') {
         return { error: 'Only the graph owner can delete people.' }
     }
 

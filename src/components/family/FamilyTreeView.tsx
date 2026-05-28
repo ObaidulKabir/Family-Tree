@@ -419,7 +419,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
       : typeof data.graphPermission?.role === 'string'
         ? data.graphPermission.role.trim().toUpperCase()
         : ''
-  const canDeletePeople = normalizedGraphRole === 'OWNER'
+  const canDeletePeople = normalizedGraphRole === 'ADMIN' || normalizedGraphRole === 'OWNER'
   const derivedInviteRoles =
     normalizedGraphRole === 'ADMIN' || normalizedGraphRole === 'OWNER'
       ? ['EDITOR', 'COMMENTER', 'VIEWER']
