@@ -2,12 +2,12 @@
 
 import { format } from 'date-fns';
 import Link from 'next/link';
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getPersonDetails, reassignChildToSpouse, searchPeopleInCurrentGraph } from '@/actions/family';
 import { getGraphCollaborationBarData, touchGraphPresence } from '@/actions/graphManagement';
 import { getLifeStatusLabel, isDeceasedStatus, normalizeLifeStatus } from '@/lib/lifeStatus';
 import { getLatestProfessionalPosition, normalizeProfessionalHistory } from '@/lib/personHistory';
-import { User as UserIcon, Heart, Plus, Share2, Edit2, X } from 'lucide-react';
+import { User as UserIcon, Heart, Plus, Share2, Edit2, X, ArrowLeft, ArrowRight, Home } from 'lucide-react';
 import AddPersonModal from './AddPersonModal';
 import InviteModal from './InviteModal';
 import EditPersonModal from './EditPersonModal';
@@ -193,7 +193,11 @@ function buildRoleAliases(groups: Record<string, PersonLike[]>) {
 }
 
 export default function FamilyTreeView({ initialPersonId }: { initialPersonId: string }) {
-  const [currentPersonId, setCurrentPersonId] = useState(initialPersonId);
+  const [navState, setNavState] = useState(() => ({
+    entries: [{ personId: initialPersonId, label: '' }],
+    index: 0,
+  }));
+  const currentPersonId = navState.entries[navState.index]?.personId ?? initialPersonId;
   const [data, setData] = useState<FamilyTreeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -220,6 +224,83 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
   const [activityOpen, setActivityOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
 
+  const canGoBack = navState.index > 0
+  const canGoForward = navState.index < navState.entries.length - 1
+
+  const navigateToPerson = useCallback(
+    (personId: string, options?: { label?: string; mode?: 'push' | 'replace' }) => {
+      const normalizedId = String(personId ?? '').trim()
+      if (!normalizedId) return
+
+      setHighlightedPersonId(normalizedId)
+      setNavState((current) => {
+        const currentEntry = current.entries[current.index]
+        if (options?.mode !== 'replace' && currentEntry?.personId === normalizedId) {
+          return current
+        }
+
+        const label = (options?.label ?? '').trim()
+
+        if (options?.mode === 'replace') {
+          const nextEntries = current.entries.slice()
+          nextEntries[current.index] = {
+            personId: normalizedId,
+            label: label || nextEntries[current.index]?.label || '',
+          }
+          return { entries: nextEntries, index: current.index }
+        }
+
+        const prefix = current.entries.slice(0, current.index + 1)
+        const nextEntries = [...prefix, { personId: normalizedId, label }]
+        return { entries: nextEntries, index: nextEntries.length - 1 }
+      })
+    },
+    []
+  )
+
+  const goBack = useCallback(() => {
+    setNavState((current) => {
+      if (current.index <= 0) return current
+      return { ...current, index: current.index - 1 }
+    })
+  }, [])
+
+  const goForward = useCallback(() => {
+    setNavState((current) => {
+      if (current.index >= current.entries.length - 1) return current
+      return { ...current, index: current.index + 1 }
+    })
+  }, [])
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (!event.altKey) return
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        goBack()
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        goForward()
+      }
+    }
+
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [goBack, goForward])
+
+  useEffect(() => {
+    if (!data?.person?.id) return
+    const currentLabel = getPersonCardDisplayName(data.person, 'nicknameOrFull')
+    setNavState((current) => {
+      const entry = current.entries[current.index]
+      if (!entry || entry.personId !== data.person.id) return current
+      if (entry.label && entry.label === currentLabel) return current
+      const nextEntries = current.entries.slice()
+      nextEntries[current.index] = { ...entry, label: currentLabel }
+      return { ...current, entries: nextEntries }
+    })
+  }, [data?.person?.id, data?.person?.firstName, data?.person?.lastName, data?.person?.nickName])
+
   async function loadPerson(id: string) {
     setLoading(true);
     const result = (await getPersonDetails(id)) as FamilyTreeData | { error: string };
@@ -236,7 +317,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
   }, [currentPersonId]);
 
   useEffect(() => {
-    setCurrentPersonId(initialPersonId);
+    setNavState({ entries: [{ personId: initialPersonId, label: '' }], index: 0 })
     setHighlightedPersonId(initialPersonId);
     setInviteOpen(false);
     setActivityOpen(false);
@@ -458,6 +539,14 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
       child: children,
       sibling: siblings
   })
+  const breadcrumbs = useMemo(() => {
+    const start = Math.max(0, navState.index - 3)
+    const slice = navState.entries.slice(start, navState.index + 1)
+    return {
+      start,
+      items: slice.map((entry, idx) => ({ entry, index: start + idx })),
+    }
+  }, [navState.entries, navState.index])
 
   return (
     <div className="flex flex-col items-center gap-8 min-h-[600px] py-10">
@@ -486,8 +575,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
             items={collabBar?.activity ?? []}
             onOpenPerson={(personId) => {
               setActivityOpen(false)
-              setCurrentPersonId(personId)
-              setHighlightedPersonId(personId)
+              navigateToPerson(personId)
             }}
           />
           {inviteOpen && canInvite ? (
@@ -499,6 +587,75 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
           ) : null}
         </>
       ) : null}
+      <div className="w-full max-w-5xl">
+        <nav
+          aria-label="Family view navigation"
+          className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={goBack}
+              disabled={!canGoBack}
+              aria-label="Back"
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:opacity-50"
+              title="Back (Alt + Left)"
+            >
+              <ArrowLeft size={16} />
+              <span className="hidden sm:inline">Back</span>
+            </button>
+            <button
+              type="button"
+              onClick={goForward}
+              disabled={!canGoForward}
+              aria-label="Forward"
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:opacity-50"
+              title="Forward (Alt + Right)"
+            >
+              <ArrowRight size={16} />
+              <span className="hidden sm:inline">Forward</span>
+            </button>
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              title="Dashboard"
+            >
+              <Home size={16} />
+              <span>Dashboard</span>
+            </Link>
+          </div>
+
+          <div className="min-w-0 overflow-x-auto">
+            <div className="flex min-w-0 flex-nowrap items-center gap-2 whitespace-nowrap text-sm text-slate-600">
+              <span className="hidden sm:inline text-slate-500">History:</span>
+            {breadcrumbs.start > 0 ? (
+              <span className="text-slate-400">…</span>
+            ) : null}
+            {breadcrumbs.items.map((item, idx, arr) => {
+              const active = item.index === navState.index
+              const label = item.entry.label || item.entry.personId.slice(0, 8)
+              return (
+                <span key={`${item.entry.personId}-${item.index}`} className="min-w-0 flex items-center gap-2">
+                  {active ? (
+                    <span className="max-w-[260px] truncate font-semibold text-slate-900">{label}</span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setNavState((current) => ({ ...current, index: item.index }))}
+                      className="max-w-[200px] truncate text-slate-600 hover:text-slate-900 hover:underline focus:outline-none focus:ring-2 focus:ring-indigo-200 rounded"
+                      title={label}
+                    >
+                      {label}
+                    </button>
+                  )}
+                  {idx < arr.length - 1 ? <span className="text-slate-300">/</span> : null}
+                </span>
+              )
+            })}
+          </div>
+          </div>
+        </nav>
+      </div>
       {!allowManage ? (
         <div
           className={`w-full max-w-5xl rounded-xl border px-4 py-3 text-xs shadow-sm ${
@@ -569,8 +726,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                       setShowResults(false);
                       setSearchQuery('');
                       setSearchResults([]);
-                      setCurrentPersonId(p.id);
-                      setHighlightedPersonId(p.id);
+                      navigateToPerson(p.id, { label: display });
                     }}
                     className="flex w-full flex-col items-start gap-0.5 px-4 py-3 text-left hover:bg-indigo-50"
                   >
@@ -610,7 +766,12 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
           {parents.length > 0 ? (
             <div className="flex gap-4 p-4 bg-white/50 rounded-xl border border-gray-100 shadow-sm">
               {parents.map((p: PersonLike) => (
-                <PersonCard key={p.id} person={p} onClick={() => setCurrentPersonId(p.id)} onEdit={allowEdit ? () => handleEdit(p) : undefined} />
+                <PersonCard
+                  key={p.id}
+                  person={p}
+                  onClick={() => navigateToPerson(p.id, { label: getPersonCardDisplayName(p, 'nicknameOrFull') })}
+                  onEdit={allowEdit ? () => handleEdit(p) : undefined}
+                />
               ))}
             </div>
           ) : (
@@ -638,7 +799,15 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                 <h3 className="mb-2 text-xs font-bold text-gray-400 tracking-wider uppercase">Siblings</h3>
                 <div className="flex gap-2 flex-wrap max-w-xs justify-center">
                     {siblings.map((s: PersonLike) => (
-                        <PersonCard key={s.id} person={s} compact displayNameMode="nicknameOrFull" aliasRoles={[...(roleAliases.get(s.id) ?? [])].filter((role) => role !== 'sibling')} onClick={() => setCurrentPersonId(s.id)} onEdit={allowEdit ? () => handleEdit(s) : undefined} />
+                        <PersonCard
+                          key={s.id}
+                          person={s}
+                          compact
+                          displayNameMode="nicknameOrFull"
+                          aliasRoles={[...(roleAliases.get(s.id) ?? [])].filter((role) => role !== 'sibling')}
+                          onClick={() => navigateToPerson(s.id, { label: getPersonCardDisplayName(s, 'nicknameOrFull') })}
+                          onEdit={allowEdit ? () => handleEdit(s) : undefined}
+                        />
                     ))}
                 </div>
             </div>
@@ -761,7 +930,12 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                                             </span>
                                         ) : null}
                                     </button>
-                                    <PersonCard person={s} aliasRoles={[...(roleAliases.get(s.id) ?? [])].filter((role) => role !== 'spouse')} onClick={() => setCurrentPersonId(s.id)} onEdit={allowEdit ? () => handleEdit(s) : undefined} />
+                                    <PersonCard
+                                      person={s}
+                                      aliasRoles={[...(roleAliases.get(s.id) ?? [])].filter((role) => role !== 'spouse')}
+                                      onClick={() => navigateToPerson(s.id, { label: getPersonCardDisplayName(s, 'nicknameOrFull') })}
+                                      onEdit={allowEdit ? () => handleEdit(s) : undefined}
+                                    />
                                     {allowEdit && getAssociableChildrenForSpouse(children, s.familyId).length > 0 ? (
                                         <button
                                             onClick={(e) => { e.stopPropagation(); handleAssociateChild(s); }}
@@ -813,7 +987,13 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
             return (
               <div key={c.id} className="relative pt-6">
                   <div className="absolute top-0 left-1/2 -translate-x-1/2 h-6 w-0.5 bg-gray-300"></div>
-                  <PersonCard person={c} displayNameMode="nicknameOrFull" aliasRoles={[...(roleAliases.get(c.id) ?? [])].filter((role) => role !== 'child')} onClick={() => setCurrentPersonId(c.id)} onEdit={allowEdit ? () => handleEdit(c) : undefined} />
+                  <PersonCard
+                    person={c}
+                    displayNameMode="nicknameOrFull"
+                    aliasRoles={[...(roleAliases.get(c.id) ?? [])].filter((role) => role !== 'child')}
+                    onClick={() => navigateToPerson(c.id, { label: getPersonCardDisplayName(c, 'nicknameOrFull') })}
+                    onEdit={allowEdit ? () => handleEdit(c) : undefined}
+                  />
                   {spouseOptions.length > 0 ? (
                     <div className="mt-2 flex flex-col items-center gap-2">
                       <div className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
