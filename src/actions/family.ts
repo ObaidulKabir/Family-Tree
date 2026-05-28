@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { auth } from '@/auth'
 import { computeRelationshipDistance, createPersonClaims, createRelationshipClaim, upsertUserPersonLink } from '@/lib/graph'
 import { canEditGraph, canManageGraph, validateOptimisticConcurrency } from '@/lib/graphManagement'
+import { normalizeLifeStatus } from '@/lib/lifeStatus'
 import { normalizeEducationHistory, normalizeProfessionalHistory } from '@/lib/personHistory'
 import {
     buildChildAssociationAuditDescription,
@@ -656,12 +657,13 @@ export async function updatePerson(
         middleName?: string;
         nickName?: string;
         gender?: string; 
+        lifeStatus?: string;
         educationHistory?: unknown;
         professionalHistory?: unknown;
         dateOfBirth?: Date; 
         placeOfBirth?: string;
-        dateOfDeath?: Date;
-        placeOfDeath?: string;
+        dateOfDeath?: Date | null;
+        placeOfDeath?: string | null;
         title?: string;
         photoUrl?: string;
         photoDate?: Date;
@@ -683,6 +685,9 @@ export async function updatePerson(
         const distance = await computeRelationshipDistance(prisma, userId, personId);
         const educationHistory = normalizeEducationHistory(data.educationHistory)
         const professionalHistory = normalizeProfessionalHistory(data.professionalHistory)
+        const lifeStatus = normalizeLifeStatus(data.lifeStatus ?? person.lifeStatus)
+        const deathDate = lifeStatus === 'DECEASED' ? data.dateOfDeath ?? null : null
+        const deathPlace = lifeStatus === 'DECEASED' ? data.placeOfDeath ?? null : null
 
         await prisma.$transaction(async (tx) => {
             const concurrency = validateOptimisticConcurrency({
@@ -702,12 +707,13 @@ export async function updatePerson(
                     middleName: data.middleName,
                     nickName: data.nickName,
                     gender: data.gender,
+                    lifeStatus,
                     educationHistory,
                     professionalHistory,
                     dateOfBirth: data.dateOfBirth,
                     placeOfBirth: data.placeOfBirth,
-                    dateOfDeath: data.dateOfDeath,
-                    placeOfDeath: data.placeOfDeath,
+                    dateOfDeath: deathDate,
+                    placeOfDeath: deathPlace,
                     title: data.title,
                     contributorId: userId,
                     relationshipDistance: distance ?? undefined
@@ -725,10 +731,11 @@ export async function updatePerson(
                     middleName: data.middleName ?? null,
                     nickName: data.nickName ?? null,
                     gender: data.gender ?? null,
+                    lifeStatus,
                     dateOfBirth: data.dateOfBirth ?? null,
                     placeOfBirth: data.placeOfBirth ?? null,
-                    dateOfDeath: data.dateOfDeath ?? null,
-                    placeOfDeath: data.placeOfDeath ?? null,
+                    dateOfDeath: deathDate,
+                    placeOfDeath: deathPlace,
                     title: data.title ?? null,
                 },
             });
@@ -749,17 +756,18 @@ export async function updatePerson(
                     middleName: data.middleName,
                     nickName: data.nickName,
                     gender: data.gender,
+                    lifeStatus,
                     educationHistory,
                     professionalHistory,
                     dateOfBirth: data.dateOfBirth,
                     placeOfBirth: data.placeOfBirth,
-                    dateOfDeath: data.dateOfDeath,
-                    placeOfDeath: data.placeOfDeath,
+                    dateOfDeath: deathDate,
+                    placeOfDeath: deathPlace,
                     title: data.title
                 }
             });
             
-            if (data.dateOfDeath) {
+            if (lifeStatus === 'DECEASED') {
                 const deathEvent = await tx.familyEvent.findFirst({
                     where: {
                         type: 'DEATH',
@@ -771,8 +779,8 @@ export async function updatePerson(
                     await tx.familyEvent.update({
                         where: { id: deathEvent.id },
                         data: {
-                            date: data.dateOfDeath,
-                            place: data.placeOfDeath
+                            date: deathDate,
+                            place: deathPlace
                         }
                     });
                 } else {
@@ -780,11 +788,18 @@ export async function updatePerson(
                         data: {
                             type: 'DEATH',
                             personId: personId,
-                            date: data.dateOfDeath,
-                            place: data.placeOfDeath
+                            date: deathDate,
+                            place: deathPlace
                         }
                     });
                 }
+            } else {
+                await tx.familyEvent.deleteMany({
+                    where: {
+                        type: 'DEATH',
+                        personId: personId,
+                    }
+                })
             }
             
             if (data.removePhoto) {

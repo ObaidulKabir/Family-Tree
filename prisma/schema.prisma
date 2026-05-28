@@ -106,6 +106,7 @@ model Person {
   nickName            String?
   title               String?
   gender              String?
+  lifeStatus          String  @default("LIVING")
   educationHistory    Json?
   professionalHistory Json?
   livingHistory       Json?
@@ -163,6 +164,7 @@ model PersonLayer {
   nickName            String?
   title               String?
   gender              String?
+  lifeStatus          String?
   educationHistory    Json?
   professionalHistory Json?
   dateOfBirth         DateTime?

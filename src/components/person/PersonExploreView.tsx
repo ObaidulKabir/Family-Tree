@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 
+import { getLifeStatusLabel, normalizeLifeStatus } from '@/lib/lifeStatus'
 import {
   getLatestProfessionalPosition,
   normalizeEducationHistory,
@@ -23,6 +24,7 @@ type ExplorePerson = {
   firstName: string
   lastName?: string | null
   title?: string | null
+  lifeStatus?: string | null
   dateOfBirth?: string | Date | null
   placeOfBirth?: string | null
   dateOfDeath?: string | Date | null
@@ -146,6 +148,7 @@ export default function PersonExploreView({
   const [professionalMessage, setProfessionalMessage] = useState('')
 
   const latestPosition = getLatestProfessionalPosition(professionalHistory)
+  const lifeStatus = normalizeLifeStatus(person.lifeStatus)
 
   const filteredLivingHistory = useMemo(() => {
     const normalizedQuery = livingQuery.trim().toLowerCase()
@@ -367,11 +370,40 @@ export default function PersonExploreView({
           <h1 className="mt-2 text-3xl font-serif font-bold text-slate-900">
             {person.firstName} {person.lastName}
           </h1>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span
+              className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${
+                lifeStatus === 'DECEASED'
+                  ? 'bg-slate-200 text-slate-700'
+                  : lifeStatus === 'UNKNOWN'
+                    ? 'bg-amber-100 text-amber-800'
+                    : 'bg-emerald-50 text-emerald-700'
+              }`}
+            >
+              {getLifeStatusLabel(lifeStatus)}
+            </span>
+            {lifeStatus === 'DECEASED' && !person.dateOfDeath ? (
+              <span className="text-sm text-slate-500">Exact death date not known</span>
+            ) : null}
+          </div>
           {person.title ? <p className="mt-1 text-sm font-medium text-indigo-600">{person.title}</p> : null}
           {latestPosition ? (
             <p className="mt-1 text-sm text-slate-600">
               Latest role: {[latestPosition.position, latestPosition.company].filter(Boolean).join(' @ ')}
             </p>
+          ) : null}
+          {lifeStatus === 'DECEASED' ? (
+            <p className="mt-1 text-sm text-slate-600">
+              {person.dateOfDeath ? `Died ${formatDate(person.dateOfDeath)}` : 'Marked as deceased'}
+              {person.placeOfDeath ? ` • ${person.placeOfDeath}` : ''}
+            </p>
+          ) : lifeStatus === 'LIVING' && person.dateOfBirth ? (
+            <p className="mt-1 text-sm text-slate-600">
+              Born {formatDate(person.dateOfBirth)}
+              {person.placeOfBirth ? ` • ${person.placeOfBirth}` : ''}
+            </p>
+          ) : lifeStatus === 'UNKNOWN' ? (
+            <p className="mt-1 text-sm text-slate-600">Life status has not been confirmed yet.</p>
           ) : null}
         </div>
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">

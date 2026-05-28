@@ -24,6 +24,7 @@ export default async function PersonExplorePage({ params }: { params: Promise<{ 
       firstName: true,
       lastName: true,
       title: true,
+      lifeStatus: true,
       dateOfBirth: true,
       placeOfBirth: true,
       dateOfDeath: true,

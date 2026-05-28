@@ -33,6 +33,7 @@ type ResolvablePerson = {
   nickName?: string | null
   title?: string | null
   gender?: string | null
+  lifeStatus?: string | null
   dateOfBirth?: Date | string | null
   placeOfBirth?: string | null
   dateOfDeath?: Date | string | null
@@ -46,6 +47,7 @@ const FIELD_NAMES = [
   'nickName',
   'title',
   'gender',
+  'lifeStatus',
   'dateOfBirth',
   'placeOfBirth',
   'dateOfDeath',

@@ -83,6 +83,7 @@ export async function acceptInvitation(token: string) {
                 nickName: invitation.person.nickName ?? null,
                 title: invitation.person.title ?? null,
                 gender: invitation.person.gender ?? null,
+                lifeStatus: invitation.person.lifeStatus ?? 'LIVING',
                 dateOfBirth: invitation.person.dateOfBirth ?? null,
                 placeOfBirth: invitation.person.placeOfBirth ?? null,
                 dateOfDeath: invitation.person.dateOfDeath ?? null,

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useState, useEffect, useRef } from 'react';
 import { getPersonDetails, reassignChildToSpouse, searchPeopleInCurrentGraph } from '@/actions/family';
 import { getGraphCollaborationBarData, touchGraphPresence } from '@/actions/graphManagement';
+import { getLifeStatusLabel, isDeceasedStatus, normalizeLifeStatus } from '@/lib/lifeStatus';
 import { getLatestProfessionalPosition, normalizeProfessionalHistory } from '@/lib/personHistory';
 import { User as UserIcon, Heart, Plus, Share2, Edit2, X } from 'lucide-react';
 import AddPersonModal from './AddPersonModal';
@@ -33,6 +34,7 @@ type PersonLike = {
   educationHistory?: unknown;
   professionalHistory?: unknown;
   nickName?: string | null;
+  lifeStatus?: string | null;
   dateOfBirth?: DateLike;
   placeOfBirth?: string | null;
   dateOfDeath?: DateLike;
@@ -93,19 +95,36 @@ function formatDisplayDate(value: DateLike) {
 }
 
 function isPersonDeceased(person: PersonLike) {
-  return Boolean(person.dateOfDeath);
+  return isDeceasedStatus(person.lifeStatus);
+}
+
+function getPersonLifeStatus(person: PersonLike) {
+  return normalizeLifeStatus(person.lifeStatus)
 }
 
 function getLifeSummary(person: PersonLike) {
+  const status = getPersonLifeStatus(person)
   const born = formatDisplayDate(person.dateOfBirth);
   const died = formatDisplayDate(person.dateOfDeath);
 
-  if (died) {
+  if (status === 'DECEASED' && died) {
     return `${born ? born : 'Date unknown'} — ${died}`;
+  }
+
+  if (status === 'DECEASED' && born) {
+    return `Born: ${born} • Deceased`
   }
 
   if (born) {
     return `Born: ${born}`;
+  }
+
+  if (status === 'DECEASED') {
+    return 'Date of death unknown'
+  }
+
+  if (status === 'UNKNOWN') {
+    return 'Life status not confirmed'
   }
 
   return 'Living'
@@ -627,11 +646,11 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
       
         {/* Main Focus Group */}
         <div className="flex flex-col items-center relative z-10">
-            <div data-person-id={person.id} className={`flex flex-col items-center gap-4 p-4 rounded-2xl shadow-xl border ring-4 sm:flex-row sm:gap-6 sm:p-6 ${isPersonDeceased(person) ? 'bg-slate-50 border-slate-200 ring-slate-100' : 'bg-white border-indigo-50 ring-indigo-50/50'} ${highlightedPersonId === person.id ? 'ring-amber-200 border-amber-100 shadow-amber-100/40 shadow-xl' : ''}`}>
+            <div data-person-id={person.id} className={`flex flex-col items-center gap-4 p-4 rounded-2xl shadow-xl border ring-4 sm:flex-row sm:gap-6 sm:p-6 ${getPersonLifeStatus(person) === 'DECEASED' ? 'bg-slate-50 border-slate-200 ring-slate-100' : getPersonLifeStatus(person) === 'UNKNOWN' ? 'bg-amber-50 border-amber-100 ring-amber-50' : 'bg-white border-indigo-50 ring-indigo-50/50'} ${highlightedPersonId === person.id ? 'ring-amber-200 border-amber-100 shadow-amber-100/40 shadow-xl' : ''}`}>
                 
                 {/* Focal Person */}
                 <div className="flex flex-col items-center group">
-                    <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-3 overflow-hidden border-4 shadow-md relative group ${isPersonDeceased(person) ? 'bg-slate-200 border-slate-100' : 'bg-indigo-100 border-white'}`}>
+                    <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-3 overflow-hidden border-4 shadow-md relative group ${getPersonLifeStatus(person) === 'DECEASED' ? 'bg-slate-200 border-slate-100' : getPersonLifeStatus(person) === 'UNKNOWN' ? 'bg-amber-100 border-amber-50' : 'bg-indigo-100 border-white'}`}>
                         {getPrimaryPhotoUrl(person) ? (
                             <>
                                 <img src={getPrimaryPhotoUrl(person) ?? undefined} alt={person.firstName} className={`w-full h-full object-cover ${isPersonDeceased(person) ? 'grayscale' : ''}`} />
@@ -650,13 +669,17 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                         {person.title ? (
                           <p className={`text-sm font-medium ${isPersonDeceased(person) ? 'text-slate-600' : 'text-indigo-600'}`}>{person.title}</p>
                         ) : null}
-                        {isPersonDeceased(person) ? (
+                        {getPersonLifeStatus(person) === 'DECEASED' ? (
                           <span className="rounded-full bg-slate-200 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-700">
-                            In memory
+                            {getLifeStatusLabel(person.lifeStatus)}
+                          </span>
+                        ) : getPersonLifeStatus(person) === 'UNKNOWN' ? (
+                          <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+                            {getLifeStatusLabel(person.lifeStatus)}
                           </span>
                         ) : (
                           <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
-                            Living
+                            {getLifeStatusLabel(person.lifeStatus)}
                           </span>
                         )}
                     </div>
@@ -667,10 +690,15 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
                     <ReviewBadge person={person} />
                     
                     <div className="text-xs text-gray-400 mt-2 flex flex-col items-center gap-0.5">
-                        {isPersonDeceased(person) ? (
+                        {getPersonLifeStatus(person) === 'DECEASED' ? (
                           <>
                             <span className="text-slate-600">{getLifeSummary(person)}</span>
                             {person.placeOfDeath ? <span className="text-gray-500">{person.placeOfDeath}</span> : null}
+                          </>
+                        ) : getPersonLifeStatus(person) === 'UNKNOWN' ? (
+                          <>
+                            <span>{getLifeSummary(person)}</span>
+                            {person.placeOfBirth ? <span className="text-gray-500">{person.placeOfBirth}</span> : null}
                           </>
                         ) : (
                           <>
@@ -913,6 +941,7 @@ export default function FamilyTreeView({ initialPersonId }: { initialPersonId: s
 
 function PersonCard({ person, onClick, onEdit, compact, displayNameMode = 'default', aliasRoles = [] }: { person: PersonLike, onClick: () => void, onEdit?: () => void, compact?: boolean, displayNameMode?: 'default' | 'nicknameOrFull', aliasRoles?: string[] }) {
     const deceased = isPersonDeceased(person)
+    const lifeStatus = getPersonLifeStatus(person)
     const primaryName = getPersonCardDisplayName(person, displayNameMode)
     const showSeparateLastName = !compact && displayNameMode === 'default'
 
@@ -968,9 +997,13 @@ function PersonCard({ person, onClick, onEdit, compact, displayNameMode = 'defau
                     Also: {aliasRoles.join(', ')}
                 </div>
             ) : null}
-            {deceased ? (
+            {lifeStatus === 'DECEASED' ? (
                 <div className="mt-2 rounded-full bg-slate-200 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-700">
-                    In memory
+                    {getLifeStatusLabel(person.lifeStatus)}
+                </div>
+            ) : lifeStatus === 'UNKNOWN' ? (
+                <div className="mt-2 rounded-full bg-amber-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+                    {getLifeStatusLabel(person.lifeStatus)}
                 </div>
             ) : null}
             <ReviewBadge person={person} compact={compact} />

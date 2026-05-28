@@ -25,6 +25,7 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
         middleName: true,
         nickName: true,
         title: true,
+        lifeStatus: true,
         dateOfBirth: true,
         placeOfBirth: true,
         dateOfDeath: true,

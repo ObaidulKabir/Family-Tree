@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { deletePerson, updatePerson } from '@/actions/family';
 import { Loader2, Upload, X } from 'lucide-react';
+import { normalizeLifeStatus, type LifeStatus } from '@/lib/lifeStatus';
 import {
   normalizeEducationHistory,
   normalizeProfessionalHistory,
@@ -20,6 +21,7 @@ interface EditPersonModalProps {
     nickName?: string | null;
     title?: string | null;
     gender?: string | null;
+    lifeStatus?: string | null;
     educationHistory?: unknown;
     professionalHistory?: unknown;
     dateOfBirth?: string | Date | null;
@@ -65,6 +67,12 @@ const modalTabs = [
 
 type ModalTabId = (typeof modalTabs)[number]['id']
 
+const lifeStatusOptions: Array<{ value: LifeStatus; label: string; description: string }> = [
+  { value: 'LIVING', label: 'Living', description: 'Use when the person is known to be living.' },
+  { value: 'DECEASED', label: 'Deceased', description: 'Use even if the exact death date is not known.' },
+  { value: 'UNKNOWN', label: 'Unknown', description: 'Use when the life status is uncertain or unconfirmed.' },
+]
+
 function normalizePhotoUrl(value: string) {
   const cleaned = value.trim().replaceAll('\\', '/')
   if (!cleaned) return null
@@ -88,6 +96,7 @@ export default function EditPersonModal({ person, onClose, onSuccess, canDelete,
     nickName: person.nickName || '',
     title: person.title || '',
     gender: person.gender || 'UNKNOWN',
+    lifeStatus: normalizeLifeStatus(person.lifeStatus),
     dateOfBirth: person.dateOfBirth ? new Date(person.dateOfBirth).toISOString().split('T')[0] : '',
     placeOfBirth: person.placeOfBirth || '',
     dateOfDeath: person.dateOfDeath ? new Date(person.dateOfDeath).toISOString().split('T')[0] : '',
@@ -106,6 +115,7 @@ export default function EditPersonModal({ person, onClose, onSuccess, canDelete,
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const showDeathDetails = formData.lifeStatus === 'DECEASED'
 
   const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -166,7 +176,8 @@ export default function EditPersonModal({ person, onClose, onSuccess, canDelete,
       const data = {
         ...formData,
         dateOfBirth: formData.dateOfBirth ? new Date(formData.dateOfBirth) : undefined,
-        dateOfDeath: formData.dateOfDeath ? new Date(formData.dateOfDeath) : undefined,
+        dateOfDeath: showDeathDetails ? (formData.dateOfDeath ? new Date(formData.dateOfDeath) : null) : null,
+        placeOfDeath: showDeathDetails ? (formData.placeOfDeath.trim() || null) : null,
         photoUrl: formData.photoUrl || undefined,
         photoDate: formData.photoDate ? new Date(formData.photoDate) : undefined,
         replacePhoto,
@@ -323,6 +334,37 @@ export default function EditPersonModal({ person, onClose, onSuccess, canDelete,
                  </select>
               </div>
 
+              <div>
+                <label className="block text-sm font-medium mb-2">Life Status</label>
+                <div className="grid gap-3 md:grid-cols-3">
+                  {lifeStatusOptions.map((option) => {
+                    const active = formData.lifeStatus === option.value
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() =>
+                          setFormData((current) => ({
+                            ...current,
+                            lifeStatus: option.value,
+                            dateOfDeath: option.value === 'DECEASED' ? current.dateOfDeath : '',
+                            placeOfDeath: option.value === 'DECEASED' ? current.placeOfDeath : '',
+                          }))
+                        }
+                        className={`rounded-xl border px-4 py-3 text-left transition-colors ${
+                          active
+                            ? 'border-indigo-500 bg-indigo-50 text-indigo-900'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="text-sm font-semibold">{option.label}</div>
+                        <div className="mt-1 text-xs text-current/80">{option.description}</div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">Date of Birth</label>
@@ -343,25 +385,41 @@ export default function EditPersonModal({ person, onClose, onSuccess, canDelete,
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Date of Death</label>
-                  <input
-                    type="date"
-                    className="w-full border rounded px-3 py-2"
-                    value={formData.dateOfDeath}
-                    onChange={e => setFormData({...formData, dateOfDeath: e.target.value})}
-                  />
+              {showDeathDetails ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="mb-3">
+                    <div className="text-sm font-medium text-slate-900">Death details</div>
+                    <div className="mt-1 text-xs text-slate-500">You can leave the death date blank if the person is known to be deceased but the exact date is unknown.</div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Date of Death</label>
+                      <input
+                        type="date"
+                        className="w-full border rounded px-3 py-2"
+                        value={formData.dateOfDeath}
+                        onChange={e => setFormData({...formData, dateOfDeath: e.target.value})}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Place of Death</label>
+                      <input
+                        className="w-full border rounded px-3 py-2"
+                        value={formData.placeOfDeath}
+                        onChange={e => setFormData({...formData, placeOfDeath: e.target.value})}
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Place of Death</label>
-                  <input
-                    className="w-full border rounded px-3 py-2"
-                    value={formData.placeOfDeath}
-                    onChange={e => setFormData({...formData, placeOfDeath: e.target.value})}
-                  />
+              ) : formData.lifeStatus === 'UNKNOWN' ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  Life status is marked as unknown. The person will not be shown as living or deceased until this is clarified.
                 </div>
-              </div>
+              ) : (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                  Living is selected. Any previously entered death details will be cleared when you save.
+                </div>
+              )}
               
               <div>
                   <label className="block text-sm font-medium mb-1">Add Photo</label>
