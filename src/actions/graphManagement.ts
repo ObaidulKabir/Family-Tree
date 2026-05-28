@@ -6,6 +6,7 @@ import type { Prisma, PrismaClient } from '@prisma/client'
 
 import { auth } from '@/auth'
 import { prisma } from '@/lib/prisma'
+import { getAppBaseUrl } from '@/lib/appUrl'
 import {
   buildGraphAuditDetails,
   canInviteGraph,
@@ -848,7 +849,7 @@ export async function createGraphInvitation(email: string, role: string) {
     })
 
     revalidatePath('/dashboard/graph-management')
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+    const baseUrl = await getAppBaseUrl()
     return { success: true, link: `${baseUrl}/invite/graph/${token}` }
   } catch (error) {
     return { error: error instanceof Error ? error.message : 'Failed to create graph invitation' }

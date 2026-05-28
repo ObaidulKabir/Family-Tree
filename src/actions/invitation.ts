@@ -6,6 +6,7 @@ import { createPersonClaims, upsertUserPersonLink } from '@/lib/graph'
 import type { Prisma } from '@prisma/client'
 import { randomBytes } from 'crypto'
 import { requireGraphPermissionForPerson } from '@/actions/graphManagement'
+import { getAppBaseUrl } from '@/lib/appUrl'
 
 export async function inviteUser(personId: string, email: string) {
     const session = await auth();
@@ -30,7 +31,7 @@ export async function inviteUser(personId: string, email: string) {
 
     // In a real app, we would send an email here.
     // For this demo, we return the link.
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const baseUrl = await getAppBaseUrl();
     return { success: true, link: `${baseUrl}/invite/${token}` };
 }
 

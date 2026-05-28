@@ -16,9 +16,9 @@ import {
   validatePasswordStrength,
 } from '@/lib/passwordSecurity'
 import { sendEmail } from '@/lib/email'
+import { getAppBaseUrl } from '@/lib/appUrl'
 import bcrypt from 'bcryptjs'
 import { auth } from '@/auth'
-import { headers } from 'next/headers'
 
 const RegisterSchema = z.object({
   email: z.string().email(),
@@ -41,22 +41,6 @@ const ResetPasswordSchema = z.object({
   password: z.string().min(1),
   confirmPassword: z.string().min(1),
 })
-
-async function getAppBaseUrl() {
-  if (process.env.NEXT_PUBLIC_APP_URL) {
-    return process.env.NEXT_PUBLIC_APP_URL
-  }
-
-  const requestHeaders = await headers()
-  const host = requestHeaders.get('x-forwarded-host') ?? requestHeaders.get('host')
-  const protocol = requestHeaders.get('x-forwarded-proto') ?? 'http'
-
-  if (host) {
-    return `${protocol}://${host}`
-  }
-
-  return 'http://localhost:3000'
-}
 
 async function createEmailVerificationSession(email: string, callbackUrl?: string | null) {
   const normalizedEmail = normalizeEmailAddress(email)
